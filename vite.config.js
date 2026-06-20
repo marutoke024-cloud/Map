@@ -41,9 +41,11 @@ function hotpepperProxy(env) {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
+    // GitHub Pages serves this project site under /Map/. Dev stays at root.
+    base: command === 'build' ? '/Map/' : '/',
     plugins: [hotpepperProxy(env)],
     server: { host: true, port: 5173 },
     build: { target: 'es2020' },

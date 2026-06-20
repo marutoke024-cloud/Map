@@ -1,16 +1,25 @@
 import './style.css';
 import { gsap } from 'gsap';
-import { loadGeo } from './map/geo.js';
+import {
+  loadGeo,
+  loadMunicipality,
+  getMunicipality,
+  featureById,
+  allFeatures,
+  frameFeatures,
+  geoBBox,
+} from './map/geo.js';
 import {
   initMap,
   flyTo,
-  frameForJapan,
-  frameForRegion,
-  frameForPrefecture,
-  setHighlight,
+  getTransform,
+  setZoomLimits,
+  setPinning,
+  renderAreas,
   renderStations,
   renderPins,
   flashPlacement,
+  screenToGeo,
 } from './map/mapRenderer.js';
 import { state, setState } from './state.js';
 import { REGIONS, PREFECTURES, PREF_KEY_BY_ID, PREF_ID_TO_REGION } from './config.js';
@@ -25,6 +34,8 @@ import {
   setBackVisible,
   renderDrawer,
   closeDrawer,
+  showStationPopup,
+  hideStationPopup,
 } from './ui/hud.js';
 import { hasFirebase } from './firebase.js';
 
@@ -37,8 +48,10 @@ const $ = (id) => document.getElementById(id);
   await loadGeo();
 
   initMap($('stage'), {
-    onMapClick: handleMapClick,
+    onAreaTap: handleAreaTap,
+    onLongPress: handleLongPress,
     onPinClick: handlePinClick,
+    onStationClick: handleStationClick,
   });
 
   initPanel($('panel'), {
@@ -48,13 +61,9 @@ const $ = (id) => document.getElementById(id);
   });
 
   state.pins = await loadPins();
-  refreshPins();
-
   wireControls();
 
-  // Intro: start dramatically over-zoomed, then settle into Japan.
   await introSequence();
-
   goJapan(false);
   hideLoader();
 })();
@@ -65,99 +74,222 @@ function hideLoader() {
 }
 
 function introSequence() {
-  // Over-scaled flourish that eases back to the full map.
-  flyTo({ k: 2.6, x: -1600, y: -1200 }, { duration: 0 });
-  return new Promise((r) => {
-    flyTo(frameForJapan(), { duration: 2.0, onComplete: r });
-  });
+  flyTo({ k: 2.4, x: -1500, y: -1100 }, { duration: 0 });
+  return new Promise((r) => flyTo(frameFeatures(mainland(), 0.04), { duration: 2.0, onComplete: r }));
+}
+
+function mainland() {
+  return allFeatures().filter((f) => f.properties.id !== 47);
 }
 
 // ---------------------------------------------------------------------------
-// Navigation
+// Level navigation
 // ---------------------------------------------------------------------------
+function applyLimits(frame, { minMul = 0.75, maxMul = 6 } = {}) {
+  setZoomLimits(frame.k * minMul, frame.k * maxMul);
+}
+
 function goJapan(animate = true) {
-  setState({ view: 'japan', regionKey: null, prefKey: null });
-  flyTo(frameForJapan(), { duration: animate ? 1.4 : 0.01 });
-  setHighlight({ view: 'japan' });
+  hideStationPopup();
+  setState({ level: 'japan', regionKey: null, prefKey: null, cityKey: null, wardKey: null });
+  setPinning(false);
+  renderStations([]);
+  const areas = mainland().map((f) => ({
+    id: f.properties.id,
+    feature: f,
+    kind: PREF_ID_TO_REGION[f.properties.id] ? 'playable' : 'dim',
+  }));
+  renderAreas(areas, { baseFeature: null, showLabels: false });
+  const frame = frameFeatures(mainland(), 0.04);
+  applyLimits(frame, { minMul: 0.9, maxMul: 3 });
+  flyTo(frame, { duration: animate ? 1.4 : 0.01 });
   setBackVisible(false);
   setScaleLabel('JAPAN');
-  setHint('Tap a glowing region — 近畿 or 関東');
-  setBreadcrumb([{ key: 'japan', label: 'JAPAN' }], onCrumb);
-  refreshStations();
+  setHint('Tap a glowing region — 近畿 / 関東');
+  crumbs();
   refreshPins();
 }
 
 function goRegion(regionKey, animate = true) {
+  hideStationPopup();
   const r = REGIONS[regionKey];
-  setState({ view: regionKey, regionKey, prefKey: null });
-  flyTo(frameForRegion(regionKey), { duration: animate ? 1.5 : 0.01 });
-  setHighlight({ view: regionKey, regionKey, prefKey: null });
+  setState({ level: 'region', regionKey, prefKey: null, cityKey: null, wardKey: null });
+  setPinning(false);
+  renderStations([]);
+  const memberIds = new Set(r.members.map((k) => PREFECTURES[k].id));
+  const areas = mainland().map((f) => ({
+    id: f.properties.id,
+    feature: f,
+    kind: memberIds.has(f.properties.id) ? 'member' : 'dim',
+  }));
+  renderAreas(areas, { baseFeature: null, showLabels: false });
+  const frame = frameFeatures(r.members.map((k) => featureById(PREFECTURES[k].id)), 0.3);
+  applyLimits(frame);
+  flyTo(frame, { duration: animate ? 1.5 : 0.01 });
   setBackVisible(true);
   setScaleLabel(r.en);
   showStageTitle(r.ja, r.en);
   setHint('Choose a prefecture');
-  setBreadcrumb([{ key: 'japan', label: 'JAPAN' }, { key: regionKey, label: r.en }], onCrumb);
-  refreshStations();
+  crumbs();
   refreshPins();
 }
 
 async function goPrefecture(prefKey, animate = true) {
+  hideStationPopup();
   const p = PREFECTURES[prefKey];
   const regionKey = PREF_ID_TO_REGION[p.id];
-  setState({ view: prefKey, regionKey, prefKey });
-  flyTo(frameForPrefecture(prefKey), { duration: animate ? 1.6 : 0.01 });
-  setHighlight({ view: prefKey, regionKey, prefKey });
+  setState({ level: 'prefecture', regionKey, prefKey, cityKey: null, wardKey: null });
+  setPinning(false);
+  renderStations([]);
+  setHint('Loading municipalities…');
+
+  const muni = await loadMunicipality(prefKey);
+  if (state.prefKey !== prefKey) return;
+  const areas = muni.cities.map((c) => ({
+    id: 'city:' + c.key,
+    feature: c.feature,
+    label: c.ja,
+    kind: 'tile',
+  }));
+  renderAreas(areas, { baseFeature: featureById(p.id), showLabels: true });
+  const frame = frameFeatures([featureById(p.id)], 0.16);
+  applyLimits(frame);
+  flyTo(frame, { duration: animate ? 1.5 : 0.01 });
   setBackVisible(true);
   setScaleLabel(p.en);
   showStageTitle(p.ja, p.en);
-  setHint('Tap anywhere on the map to drop a spot');
-  setBreadcrumb(
-    [
-      { key: 'japan', label: 'JAPAN' },
-      { key: regionKey, label: REGIONS[regionKey].en },
-      { key: prefKey, label: p.en },
-    ],
-    onCrumb,
-  );
+  setHint('Tap a city / ward to zoom in');
+  crumbs();
   refreshPins();
-  await loadStationsFor(prefKey);
 }
 
-function goBack() {
-  if (state.prefKey) goRegion(state.regionKey);
-  else if (state.regionKey) goJapan();
+async function goCity(cityKey, animate = true) {
+  hideStationPopup();
+  const muni = getMunicipality(state.prefKey);
+  const city = muni?.byCity.get(cityKey);
+  if (!city) return;
+  setState({ level: 'city', cityKey, wardKey: null });
+
+  if (city.designated) {
+    // show wards; stations appear one level deeper
+    setPinning(false);
+    renderStations([]);
+    const areas = city.wardUnits.map((w) => ({
+      id: 'ward:' + w.key,
+      feature: w.feature,
+      label: w.ja,
+      kind: 'tile',
+    }));
+    renderAreas(areas, { baseFeature: city.feature, showLabels: true });
+    const frame = frameFeatures([city.feature], 0.18);
+    applyLimits(frame);
+    flyTo(frame, { duration: animate ? 1.5 : 0.01 });
+    setHint('Tap a ward (区) to enter');
+  } else {
+    // leaf municipality: stations + pins here
+    enterLeaf(city.feature, city.ja, `${state.prefKey}:${cityKey}`, animate);
+  }
+  setBackVisible(true);
+  setScaleLabel(PREFECTURES[state.prefKey].en);
+  showStageTitle(city.ja, PREFECTURES[state.prefKey].en);
+  crumbs();
+  refreshPins();
 }
 
-function onCrumb(key) {
-  if (key === 'japan') goJapan();
-  else if (REGIONS[key]) goRegion(key);
-  else if (PREFECTURES[key]) goPrefecture(key);
+function goWard(wardKey, animate = true) {
+  hideStationPopup();
+  const muni = getMunicipality(state.prefKey);
+  const city = muni?.byCity.get(state.cityKey);
+  const ward = city?.wardUnits?.find((w) => w.key === wardKey);
+  if (!ward) return;
+  setState({ level: 'ward', wardKey });
+  enterLeaf(ward.feature, ward.ja, `${state.prefKey}:${state.cityKey}:${wardKey}`, animate);
+  setBackVisible(true);
+  setScaleLabel(city.ja);
+  showStageTitle(ward.ja, city.ja);
+  crumbs();
+  refreshPins();
+}
+
+// Shared leaf entry: extruded block, stations, pin placement enabled.
+function enterLeaf(feat, label, stationId, animate) {
+  renderAreas([{ id: 'leaf', feature: feat, label, kind: 'leaf' }], {
+    baseFeature: feat,
+    showLabels: false,
+  });
+  const frame = frameFeatures([feat], 0.22);
+  applyLimits(frame, { minMul: 0.6, maxMul: 8 });
+  flyTo(frame, { duration: animate ? 1.6 : 0.01 });
+  setPinning(true);
+  setHint('Long-press the map to drop a spot · drag to pan');
+  loadStationsFor(stationId, feat);
+}
+
+async function loadStationsFor(id, feat) {
+  if (!state.showStations) {
+    renderStations([]);
+    return;
+  }
+  setHint('Loading stations from OpenStreetMap…');
+  try {
+    const list = await loadStations(id, geoBBox(feat));
+    state.stations = { ...state.stations, [id]: list };
+    if (state.showStations) renderStations(list);
+    setHint('Long-press the map to drop a spot · tap a station for lines');
+  } catch (e) {
+    console.warn('Overpass failed', e);
+    setHint('Long-press the map to drop a spot (stations unavailable)');
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Map interactions
+// Tap / long-press / clicks
 // ---------------------------------------------------------------------------
-function handleMapClick({ prefId, geo, screen }) {
-  const region = prefId != null ? PREF_ID_TO_REGION[prefId] : null;
-
-  // Japan view: tapping a playable region zooms in.
-  if (state.view === 'japan') {
-    if (region) goRegion(region);
-    return;
+function handleAreaTap(id) {
+  switch (state.level) {
+    case 'japan': {
+      const region = PREF_ID_TO_REGION[id];
+      if (region) goRegion(region);
+      break;
+    }
+    case 'region': {
+      if (PREF_ID_TO_REGION[id] === state.regionKey) goPrefecture(PREF_KEY_BY_ID[id]);
+      break;
+    }
+    case 'prefecture':
+      if (typeof id === 'string' && id.startsWith('city:')) goCity(id.slice(5));
+      break;
+    case 'city':
+      if (typeof id === 'string' && id.startsWith('ward:')) goWard(id.slice(5));
+      break;
+    default:
+      break;
   }
-
-  // Region view: tapping a member prefecture zooms in.
-  if (!state.prefKey) {
-    const prefKey = region === state.regionKey ? PREF_KEY_BY_ID[prefId] : null;
-    if (prefKey) goPrefecture(prefKey);
-    return;
-  }
-
-  // Prefecture view: tap anywhere to drop a spot.
-  const remove = flashPlacement(screen.sx, screen.sy);
-  openPanel({ prefKey: state.prefKey, lon: geo[0], lat: geo[1] }, true);
-  setTimeout(remove, 700);
 }
+
+function handleLongPress(geo) {
+  if (state.level !== 'ward' && state.level !== 'city') return;
+  // only meaningful at leaf (city without wards, or ward)
+  const muni = getMunicipality(state.prefKey);
+  const city = muni?.byCity.get(state.cityKey);
+  if (state.level === 'city' && city?.designated) return; // not a leaf
+  const remove = flashPlacement(...lastClient);
+  openPanel(
+    {
+      prefKey: state.prefKey,
+      cityKey: state.cityKey,
+      wardKey: state.wardKey,
+      lon: geo[0],
+      lat: geo[1],
+    },
+    true,
+  );
+  setTimeout(remove, 800);
+}
+
+// remember last pointer for ghost placement
+let lastClient = [window.innerWidth / 2, window.innerHeight / 2];
+window.addEventListener('pointerdown', (e) => (lastClient = [e.clientX, e.clientY]), true);
 
 function handlePinClick(pin) {
   setState({ activePinId: pin.id });
@@ -165,36 +297,15 @@ function handlePinClick(pin) {
   openPanel(pin, false);
 }
 
+function handleStationClick(station, event) {
+  showStationPopup(station, event.clientX, event.clientY);
+}
+
 // ---------------------------------------------------------------------------
 // Data refresh
 // ---------------------------------------------------------------------------
 function refreshPins() {
   renderPins(state.pins, { privateMode: state.privateMode, activeId: state.activePinId });
-}
-
-function refreshStations() {
-  // Only show stations in prefecture view.
-  if (!state.prefKey) {
-    renderStations([], false);
-    return;
-  }
-  const list = state.stations[state.prefKey] || [];
-  renderStations(list, state.showStations);
-}
-
-async function loadStationsFor(prefKey) {
-  if (!state.stations[prefKey]) {
-    setHint('Loading stations from OpenStreetMap…');
-    try {
-      const list = await loadStations(prefKey);
-      state.stations = { ...state.stations, [prefKey]: list };
-    } catch (e) {
-      state.stations = { ...state.stations, [prefKey]: [] };
-      console.warn('Overpass failed', e);
-    }
-    setHint('Tap anywhere on the map to drop a spot');
-  }
-  if (state.prefKey === prefKey) refreshStations();
 }
 
 function handlePinSaved(pin, isNew) {
@@ -208,6 +319,35 @@ function handlePinDeleted(id) {
   state.pins = state.pins.filter((p) => p.id !== id);
   setState({ activePinId: null });
   refreshPins();
+}
+
+// ---------------------------------------------------------------------------
+// Breadcrumb + back
+// ---------------------------------------------------------------------------
+function crumbs() {
+  const c = [{ key: 'japan', label: 'JAPAN' }];
+  if (state.regionKey) c.push({ key: 'region:' + state.regionKey, label: REGIONS[state.regionKey].en });
+  if (state.prefKey) c.push({ key: 'pref:' + state.prefKey, label: PREFECTURES[state.prefKey].en });
+  if (state.cityKey) {
+    const city = getMunicipality(state.prefKey)?.byCity.get(state.cityKey);
+    c.push({ key: 'city:' + state.cityKey, label: city?.ja || '' });
+  }
+  if (state.wardKey) c.push({ key: 'ward:' + state.wardKey, label: state.wardKey });
+  setBreadcrumb(c, onCrumb);
+}
+
+function onCrumb(key) {
+  if (key === 'japan') goJapan();
+  else if (key.startsWith('region:')) goRegion(key.slice(7));
+  else if (key.startsWith('pref:')) goPrefecture(key.slice(5));
+  else if (key.startsWith('city:')) goCity(key.slice(5));
+}
+
+function goBack() {
+  if (state.level === 'ward') goCity(state.cityKey);
+  else if (state.level === 'city') goPrefecture(state.prefKey);
+  else if (state.level === 'prefecture') goRegion(state.regionKey);
+  else if (state.level === 'region') goJapan();
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +370,17 @@ function wireControls() {
     setState({ showStations: v });
     $('btn-stations').setAttribute('aria-pressed', String(v));
     $('btn-stations').classList.toggle('off', !v);
-    refreshStations();
+    if (!v) renderStations([]);
+    else if (state.level === 'ward' || state.level === 'city') {
+      const muni = getMunicipality(state.prefKey);
+      const city = muni?.byCity.get(state.cityKey);
+      if (state.level === 'ward') {
+        const ward = city?.wardUnits?.find((w) => w.key === state.wardKey);
+        if (ward) loadStationsFor(`${state.prefKey}:${state.cityKey}:${state.wardKey}`, ward.feature);
+      } else if (city && !city.designated) {
+        loadStationsFor(`${state.prefKey}:${state.cityKey}`, city.feature);
+      }
+    }
   };
 
   $('btn-list').onclick = () => {
@@ -247,16 +397,15 @@ function wireControls() {
     });
   };
 
-  // Keyboard: Esc backs out / closes overlays.
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const panel = $('panel');
-      if (!panel.hidden) closePanel();
-      else goBack();
+      if (!$('panel').hidden) closePanel();
+      else {
+        hideStationPopup();
+        goBack();
+      }
     }
   });
 
-  if (!hasFirebase) {
-    console.info('[SPOTS] Firebase not configured — pins are stored in localStorage.');
-  }
+  if (!hasFirebase) console.info('[SPOTS] Firebase not configured — pins stored in localStorage.');
 }

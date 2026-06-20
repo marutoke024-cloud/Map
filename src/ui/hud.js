@@ -86,3 +86,35 @@ export function closeDrawer() {
 function escapeHtml(s = '') {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
+
+// --- Station popup -------------------------------------------------------
+let stationPopupEl = null;
+export function showStationPopup(station, x, y) {
+  hideStationPopup();
+  const el = document.createElement('div');
+  el.className = 'station-popup';
+  const lines = (station.lines || []).filter(Boolean);
+  el.innerHTML = `
+    <div class="sp-name">${escapeHtml(station.name)}<span>駅</span></div>
+    ${
+      lines.length
+        ? `<div class="sp-lines">${lines.map((l) => `<span class="sp-line">${escapeHtml(l)}</span>`).join('')}</div>`
+        : '<div class="sp-empty">路線情報なし</div>'
+    }`;
+  document.getElementById('app').appendChild(el);
+  // position, keeping inside viewport
+  const px = Math.min(x + 14, window.innerWidth - 240);
+  const py = Math.min(y + 14, window.innerHeight - 120);
+  el.style.left = px + 'px';
+  el.style.top = py + 'px';
+  gsap.fromTo(el, { autoAlpha: 0, y: 6, scale: 0.96 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.3, ease: 'power2.out' });
+  stationPopupEl = el;
+  setTimeout(() => document.addEventListener('pointerdown', hideStationPopup, { once: true }), 0);
+}
+
+export function hideStationPopup() {
+  if (stationPopupEl) {
+    stationPopupEl.remove();
+    stationPopupEl = null;
+  }
+}

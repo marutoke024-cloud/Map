@@ -1,40 +1,38 @@
 // Rail-station data from OpenStreetMap via the Overpass API.
 //
-// Per the spec we only need stations for the 8 target prefectures. Results are
-// fetched lazily on first visit to a prefecture and cached in localStorage for
-// 30 days so we are gentle on the public Overpass endpoints.
-
-import { PREFECTURES } from '../config.js';
+// Stations are fetched for the bounding box of the deepest (leaf) area the user
+// has zoomed into — a single ward or municipality — so the query stays small.
+// For each station we also resolve the rail lines passing through it (route
+// relations) so a click can show "何線・何駅". Results are cached in
+// localStorage for 30 days.
 
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
-const CACHE_PREFIX = 'spots.stations.';
+const CACHE_PREFIX = 'spots.stations.v2.';
 const TTL = 1000 * 60 * 60 * 24 * 30;
 
-function cacheGet(prefKey) {
+function cacheGet(id) {
   try {
-    const raw = JSON.parse(localStorage.getItem(CACHE_PREFIX + prefKey) || 'null');
+    const raw = JSON.parse(localStorage.getItem(CACHE_PREFIX + id) || 'null');
     if (raw && Date.now() - raw.t < TTL) return raw.d;
   } catch {}
   return null;
 }
-function cacheSet(prefKey, data) {
+function cacheSet(id, data) {
   try {
-    localStorage.setItem(CACHE_PREFIX + prefKey, JSON.stringify({ t: Date.now(), d: data }));
+    localStorage.setItem(CACHE_PREFIX + id, JSON.stringify({ t: Date.now(), d: data }));
   } catch {}
 }
 
-function buildQuery(osmArea) {
-  // station=* nodes and railway=station nodes within the named admin area.
-  return `[out:json][timeout:25];
-area["name:en"="${osmArea}"]["admin_level"~"4|5"]->.a;
-(
-  node["railway"="station"]["station"!="subway"](area.a);
-  node["railway"="station"](area.a);
-);
-out body 1200;`;
+function buildQuery([[minLon, minLat], [maxLon, maxLat]]) {
+  const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:40];
+node["railway"="station"](${bbox})->.st;
+.st out body;
+rel(bn.st)["route"~"train|subway|light_rail|monorail|tram|railway"];
+out body;`;
 }
 
 async function runOverpass(query) {
@@ -55,24 +53,51 @@ async function runOverpass(query) {
   throw lastErr;
 }
 
-export async function loadStations(prefKey) {
-  const cached = cacheGet(prefKey);
+function lineName(tags = {}) {
+  return (
+    tags['name:ja'] ||
+    tags['name'] ||
+    [tags['operator'], tags['ref']].filter(Boolean).join(' ') ||
+    tags['ref'] ||
+    ''
+  );
+}
+
+/**
+ * @param {string} id    cache id (e.g. "osaka:大阪市:西区")
+ * @param {Array}  bbox  [[minLon,minLat],[maxLon,maxLat]]
+ */
+export async function loadStations(id, bbox) {
+  const cached = cacheGet(id);
   if (cached) return cached;
 
-  const pref = PREFECTURES[prefKey];
-  if (!pref) return [];
-
-  const json = await runOverpass(buildQuery(pref.osm));
-  const seen = new Set();
-  const stations = [];
+  const json = await runOverpass(buildQuery(bbox));
+  const stationById = new Map();
   for (const el of json.elements || []) {
-    const name = el.tags?.['name'];
-    if (!name || el.lon == null) continue;
-    const key = name + '@' + el.lat.toFixed(3) + ',' + el.lon.toFixed(3);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    stations.push({ id: 'st_' + el.id, name, lon: el.lon, lat: el.lat });
+    if (el.type === 'node' && el.tags?.railway === 'station' && el.tags?.name) {
+      stationById.set(el.id, {
+        id: 'st_' + el.id,
+        osmId: el.id,
+        name: el.tags['name'],
+        lon: el.lon,
+        lat: el.lat,
+        lines: [],
+      });
+    }
   }
-  cacheSet(prefKey, stations);
+  // route relations -> attach line names to member stations
+  for (const el of json.elements || []) {
+    if (el.type !== 'relation' || !el.members) continue;
+    const ln = lineName(el.tags);
+    if (!ln) continue;
+    for (const m of el.members) {
+      if (m.type === 'node' && stationById.has(m.ref)) {
+        const s = stationById.get(m.ref);
+        if (!s.lines.includes(ln)) s.lines.push(ln);
+      }
+    }
+  }
+  const stations = [...stationById.values()];
+  cacheSet(id, stations);
   return stations;
 }

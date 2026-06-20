@@ -1,83 +1,86 @@
-// Generates representative still SVGs using the real projection + palette,
-// so the visual style can be reviewed without a browser.
-import { feature } from 'topojson-client';
+// Still-render previews that mirror the live renderer (projection, palette,
+// area tiles, labels, extrusion) so the look can be reviewed without a browser.
+import { feature, merge } from 'topojson-client';
 import { geoMercator, geoPath } from 'd3-geo';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 
 const W = 1600, H = 1000;
-const P = { deep: '#1B3C53', panel: '#234C6A', accent: '#456882', shape: '#D2C1B6', bright: '#ECE0D6', ink: '#EAF1F6', dim: '#9FB6C6' };
-const topo = JSON.parse(readFileSync('public/data/japan.topojson'));
-const fc = feature(topo, topo.objects.japan);
-const byId = {}; for (const f of fc.features) byId[f.properties.id] = f;
-const proj = geoMercator().fitExtent([[W*0.06,H*0.06],[W*0.94,H*0.94]], { type:'FeatureCollection', features: fc.features.filter(f=>f.properties.id!==47) });
+const P = { deep: '#1B3C53', shape: '#D2C1B6', bright: '#ECE0D6' };
+const jp = JSON.parse(readFileSync('public/data/japan.topojson'));
+const jfc = feature(jp, jp.objects.japan);
+const proj = geoMercator().fitExtent([[W*0.06,H*0.05],[W*0.94,H*0.95]],
+  { type:'FeatureCollection', features: jfc.features.filter(f=>f.properties.id!==47) });
 const path = geoPath(proj);
-const KINKI=[27,26,29,28], KANTO=[13,12,11,14];
 
-function frame(ids, pad){
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  for(const id of ids){const[[a,b],[c,d]]=path.bounds(byId[id]);x0=Math.min(x0,a);y0=Math.min(y0,b);x1=Math.max(x1,c);y1=Math.max(y1,d);}
-  const bw=x1-x0,bh=y1-y0,cx=(x0+x1)/2,cy=(y0+y1)/2;
-  const k=Math.min(W/(bw*(1+pad)),H/(bh*(1+pad)));
-  return {k,x:W/2-cx*k,y:H/2-cy*k};
-}
+function polys(g){ if(!g)return[]; if(g.type==='Polygon')return[g.coordinates]; if(g.type==='MultiPolygon')return g.coordinates; return []; }
+function mainBounds(f){ const ps=polys(f.geometry); if(ps.length<=1)return path.bounds(f);
+  let best,ba=-1; for(const poly of ps){ const b=path.bounds({type:'Feature',geometry:{type:'Polygon',coordinates:poly}});
+    const a=(b[1][0]-b[0][0])*(b[1][1]-b[0][1]); if(a>ba){ba=a;best=b;} } return best; }
+function frame(feats,pad){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const f of feats){const b=mainBounds(f);x0=Math.min(x0,b[0][0]);y0=Math.min(y0,b[0][1]);x1=Math.max(x1,b[1][0]);y1=Math.max(y1,b[1][1]);}
+  const bw=x1-x0,bh=y1-y0,cx=(x0+x1)/2,cy=(y0+y1)/2,k=Math.min(W/(bw*(1+pad)),H/(bh*(1+pad)));
+  return {k,x:W/2-cx*k,y:H/2-cy*k}; }
 
-const defs = `<defs>
-  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  <radialGradient id="bg" cx="50%" cy="18%" r="90%"><stop offset="0%" stop-color="#27506b"/><stop offset="45%" stop-color="${P.deep}"/><stop offset="100%" stop-color="#122b3d"/></radialGradient>
-  <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${P.bright}"/><stop offset="100%" stop-color="#C5B2A4"/></linearGradient>
-  <radialGradient id="vig" cx="50%" cy="50%" r="75%"><stop offset="55%" stop-color="transparent"/><stop offset="100%" stop-color="rgba(8,22,33,0.75)"/></radialGradient>
-</defs>`;
+const defs=`<defs>
+ <filter id="g" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ <radialGradient id="bg" cx="50%" cy="18%" r="90%"><stop offset="0%" stop-color="#27506b"/><stop offset="45%" stop-color="${P.deep}"/><stop offset="100%" stop-color="#122b3d"/></radialGradient>
+ <linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E4D7CC"/><stop offset="100%" stop-color="#CBB9AC"/></linearGradient>
+ <radialGradient id="v" cx="50%" cy="50%" r="75%"><stop offset="55%" stop-color="transparent"/><stop offset="100%" stop-color="rgba(8,22,33,0.7)"/></radialGradient></defs>`;
 
-function grid(){let s='';for(let i=-4;i<=28;i++){const x=i*W/24;s+=`<line x1="${x}" y1="${-H}" x2="${x-W*0.3}" y2="${H*2}" stroke="${P.accent}" stroke-width="0.6" opacity="0.07"/>`;}return s;}
+function extrude(d,k){ let s='<g>'; const steps=16, dy=22/k/steps, dx=dy*0.4;
+  for(let i=steps;i>=1;i--) s+=`<path d="${d}" fill="${i%2?'#324957':'#38505f'}" transform="translate(${dx*i} ${dy*i})"/>`;
+  return s+'</g>'; }
 
-function prefsLayer(activeIds, dimAll){
-  return fc.features.filter(f=>f.properties.id!==47).map(f=>{
-    const id=f.properties.id;
-    let fill='#2c5169', op=1, filter='', stroke='#16344a';
-    if(KINKI.includes(id)||KANTO.includes(id)){fill='#76909f';}
-    if(activeIds && activeIds.includes(id)){fill='url(#sg)';filter='filter="url(#glow)"';stroke='#b9a596';}
-    else if(activeIds && dimAll){fill='#24465d';op=0.5;}
-    return `<path d="${path(f)}" fill="${fill}" stroke="${stroke}" stroke-width="0.5" opacity="${op}" ${filter}/>`;
-  }).join('');
-}
+function loadMuni(k){ const t=JSON.parse(readFileSync('public/data/municipality/'+k+'.topojson'));
+  const on=Object.keys(t.objects)[0]; const geoms=t.objects[on].geometries;
+  const groups=new Map();
+  for(const g of geoms){ const p=g.properties;
+    const isWard=p.N03_003&&p.N03_003.endsWith('市')&&p.N03_004&&p.N03_004.endsWith('区');
+    const key=isWard?p.N03_003:(p.N03_004+'|'+(p.N03_003||'')); const ja=isWard?p.N03_003:p.N03_004;
+    if(!groups.has(key))groups.set(key,{key,ja,designated:isWard,geoms:[]}); groups.get(key).geoms.push(g);}
+  return {t,cities:[...groups.values()].map(c=>({...c,
+    feature: c.geoms.length>1?{type:'Feature',properties:{},geometry:merge(t,c.geoms)}:feature(t,c.geoms[0]),
+    wardUnits: c.designated?c.geoms.map(g=>({ja:g.properties.N03_004,feature:feature(t,g)})):null }))}; }
 
-function extrude(id,k){
-  const d=path(byId[id]); let s='<g>';
-  const steps=20, dy=26/k/steps, dx=dy*0.35;
-  for(let i=steps;i>=1;i--) s+=`<path d="${d}" fill="${i%2?'#36495a':'#3a4f5e'}" transform="translate(${dx*i} ${dy*i})"/>`;
-  s+='</g>'; return s;
+function tiles(areas, fr, withLabels){
+  let s=`<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})" stroke="#1b3c53" stroke-width="${1.1/fr.k}" stroke-linejoin="round">`;
+  for(const a of areas) s+=`<path d="${path(a.feature)}" fill="url(#t)"/>`;
+  s+='</g>';
+  if(withLabels){ for(const a of areas){ const c=path.centroid(a.feature); const x=c[0]*fr.k+fr.x,y=c[1]*fr.k+fr.y;
+    if(x<0||x>W||y<0||y>H)continue;
+    s+=`<text x="${x}" y="${y}" fill="#2a2018" font-family="sans-serif" font-weight="700" font-size="14" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="rgba(236,224,214,0.55)" stroke-width="3">${a.ja||a.label||''}</text>`; } }
+  return s;
 }
 
 mkdirSync('preview',{recursive:true});
+const wrap = (inner,title)=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${defs}<rect width="${W}" height="${H}" fill="url(#bg)"/>${inner}<rect width="${W}" height="${H}" fill="url(#v)"/>${title}</svg>`;
 
-// --- Still 1: Japan overview ---
-writeFileSync('preview/japan.svg', `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-${defs}<rect width="${W}" height="${H}" fill="url(#bg)"/>${grid()}
-${prefsLayer([...KINKI,...KANTO].map(x=>x), false)}
-<rect width="${W}" height="${H}" fill="url(#vig)"/>
-<text x="60" y="70" fill="${P.ink}" font-family="Manrope,sans-serif" font-size="26" font-weight="700" letter-spacing="8">SPOTS</text>
-<text x="60" y="92" fill="${P.dim}" font-family="Manrope" font-size="11" letter-spacing="6">ATLAS · JAPAN</text>
-<text x="${W/2}" y="${H-50}" fill="${P.dim}" font-family="Manrope" font-size="13" letter-spacing="3" text-anchor="middle">TAP A GLOWING REGION — 近畿 / 関東</text>
-</svg>`);
+// 1. Osaka prefecture -> city tiles + labels
+{ const m=loadMuni('osaka'); const osakaPref=jfc.features.find(f=>f.properties.id===27);
+  const fr=frame([osakaPref],0.16);
+  const base=`<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})">${extrude(path(osakaPref),fr.k)}</g>`;
+  writeFileSync('preview/osaka-cities.svg', wrap(base+tiles(m.cities,fr,true),
+    `<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">JAPAN › KINKI › OSAKA</text>`)); }
 
-// --- Still 2: Osaka prefecture with extrusion, pins, stations ---
-const fr = frame([27], 0.22);
-const stations=[[135.50,34.70],[135.49,34.65],[135.52,34.73],[135.43,34.65],[135.60,34.75],[135.46,34.69],[135.55,34.68]];
-const pins=[[135.50,34.69,false],[135.52,34.72,false],[135.47,34.66,true]];
-function S(lon,lat){const[x,y]=proj([lon,lat]);return [x*fr.k+fr.x, y*fr.k+fr.y];}
-writeFileSync('preview/osaka.svg', `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-${defs}<rect width="${W}" height="${H}" fill="url(#bg)"/>${grid()}
-<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})">
-  <path d="${path(byId[27])}" fill="${P.shape}" opacity="0.18" filter="url(#glow)"/>
-  ${extrude(27,fr.k)}
-  ${prefsLayer([27], true).replace(/<path[^>]*opacity="0.5"[^>]*\/>/g, m=>m)}
-</g>
-${stations.map(([lo,la])=>{const[x,y]=S(lo,la);return `<g transform="translate(${x} ${y})"><path d="M0,-7 L4,-1 L1.6,-1 L1.6,5 L-1.6,5 L-1.6,-1 L-4,-1 Z" fill="none" stroke="${P.accent}" stroke-width="1.4"/><circle r="2.1" fill="${P.ink}"/></g>`;}).join('')}
-${pins.map(([lo,la,lock])=>{const[x,y]=S(lo,la);return `<g transform="translate(${x} ${y})"><circle r="16" fill="${P.shape}" opacity="0.12"/><path d="M0,0 C-9,-12 -9,-22 0,-22 C9,-22 9,-12 0,0 Z" transform="translate(0,-2)" fill="${lock?'#b9a08f':P.shape}" stroke="${P.deep}" stroke-width="1.2"/><circle cy="-15" r="4" fill="${P.deep}"/></g>`;}).join('')}
-<rect width="${W}" height="${H}" fill="url(#vig)"/>
-<text x="${W/2}" y="${H/2}" fill="${P.shape}" font-family="'Zen Kaku Gothic New',sans-serif" font-size="120" font-weight="700" text-anchor="middle" opacity="0.9">大阪</text>
-<text x="${W/2}" y="${H/2+40}" fill="${P.dim}" font-family="Manrope" font-size="14" letter-spacing="10" text-anchor="middle">OSAKA</text>
-<text x="60" y="70" fill="${P.ink}" font-family="Manrope" font-size="13" letter-spacing="4">JAPAN › KINKI › OSAKA</text>
-</svg>`);
+// 2. Osaka City -> ward tiles + labels
+{ const m=loadMuni('osaka'); const city=m.cities.find(c=>c.ja==='大阪市');
+  const fr=frame([city.feature],0.18);
+  const base=`<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})">${extrude(path(city.feature),fr.k)}</g>`;
+  const wards=city.wardUnits.map(w=>({feature:w.feature,ja:w.ja}));
+  writeFileSync('preview/osaka-wards.svg', wrap(base+tiles(wards,fr,true),
+    `<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">… › OSAKA › 大阪市</text>`)); }
 
-console.log('wrote preview/japan.svg and preview/osaka.svg');
+// 3. Nishi-ku leaf + sample stations
+{ const m=loadMuni('osaka'); const city=m.cities.find(c=>c.ja==='大阪市');
+  const ward=city.wardUnits.find(w=>w.ja==='西区'); const fr=frame([ward.feature],0.22);
+  const base=`<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})">${extrude(path(ward.feature),fr.k)}<path d="${path(ward.feature)}" fill="url(#t)" stroke="#1b3c53" stroke-width="${1.1/fr.k}"/></g>`;
+  // sample stations from ward centroid area
+  const cen=path.centroid(ward.feature); const inv=proj.invert([cen[0],cen[1]]);
+  let st=''; for(let i=0;i<5;i++){ const lon=inv[0]+(i-2)*0.006, lat=inv[1]+((i%2)-0.5)*0.01;
+    const px=proj([lon,lat]); const x=px[0]*fr.k+fr.x,y=px[1]*fr.k+fr.y;
+    st+=`<g transform="translate(${x} ${y})"><circle r="9" fill="#fff" opacity="0.22" filter="url(#g)"/><circle r="3.6" fill="#fff" stroke="rgba(27,60,83,0.6)" stroke-width="0.6"/></g>`; }
+  writeFileSync('preview/nishiku.svg', wrap(base+st,
+    `<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">… › 大阪市 › 西区</text>
+     <text x="${W/2}" y="${H-54}" fill="#9fb6c6" font-family="sans-serif" font-size="13" letter-spacing="3" text-anchor="middle">LONG-PRESS TO DROP A SPOT · TAP A STATION FOR LINES</text>`)); }
+
+console.log('wrote osaka-cities / osaka-wards / nishiku');

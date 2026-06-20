@@ -185,6 +185,8 @@ export function openPanel(pin, isNew) {
     if (isNew) {
       saved = await addPin({
         prefKey: state.prefKey,
+        cityKey: state.cityKey || null,
+        wardKey: state.wardKey || null,
         lon: state.lon,
         lat: state.lat,
         name: state.name,

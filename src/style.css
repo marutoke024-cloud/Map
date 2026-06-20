@@ -45,80 +45,74 @@ body {
   opacity: 0.07;
 }
 
-/* prefecture shapes */
-.pref {
+/* grab cursor while panning */
+#stage { cursor: grab; }
+#stage.grabbing { cursor: grabbing; }
+
+/* area tiles (prefecture / city / ward). Crisp dark borders make boundaries
+   clearly readable; brightness change on hover, no blurry glow. */
+.areas { stroke: #16344a; stroke-linejoin: round; }
+.area {
   fill: #2c5169;
-  stroke: #16344a;
-  stroke-width: 0.5;
-  transition: fill 0.6s var(--ease), opacity 0.6s var(--ease);
-  cursor: default;
+  transition: fill 0.35s var(--ease), opacity 0.5s var(--ease);
 }
-.pref--playable {
-  fill: #6c8597;
+/* japan / region selectable prefectures */
+.area--playable { fill: #6f8799; cursor: pointer; }
+.area--playable:hover { fill: var(--shape); }
+.area--member { fill: var(--shape); cursor: pointer; }
+.area--member:hover { fill: var(--shape-bright); }
+.area--dim { fill: #24465d; opacity: 0.42; pointer-events: none; }
+/* municipal tiles + leaf */
+.area--tile {
+  fill: url(#tileGrad);
+  stroke: #1b3c53;
   cursor: pointer;
 }
-.pref--playable.pref--kinki { fill: #7c93a2; }
-.pref--playable.pref--kanto { fill: #768ea0; }
-.pref--playable:hover {
-  fill: var(--shape);
-  filter: url(#glow);
-}
-.pref.is-dim {
-  fill: #24465d;
-  opacity: 0.5;
-}
-.pref.is-member {
-  fill: var(--shape);
-  filter: url(#soft);
-}
-.pref.is-member:hover {
-  fill: var(--shape-bright);
-  filter: url(#glow);
-}
-.pref.is-active {
-  fill: url(#shapeGrad);
-  stroke: #b9a596;
-  stroke-width: 0.4;
-}
-
-/* 3D extrusion walls */
-.extrude-wall {
-  fill: #3a4f5e;
-  stroke: none;
-}
-.extrude-block .extrude-wall:nth-child(odd) { fill: #36495a; }
-.ground-glow {
-  fill: var(--shape);
-  opacity: 0.18;
-}
-
-/* stations */
-.station {
+.area--tile:hover { fill: var(--shape-bright); }
+.area--leaf {
+  fill: url(#tileGrad);
+  stroke: #1b3c53;
   pointer-events: none;
-  opacity: 0;
-  animation: fadeIn 0.6s var(--ease) forwards;
 }
-.station-mark {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.4;
-  opacity: 0.85;
+
+/* extruded plinth */
+.extrude-wall { fill: #38505f; stroke: none; }
+.extrude g .extrude-wall:nth-child(odd) { fill: #324957; }
+
+/* area labels (screen-space, constant size) */
+.area-label {
+  fill: #2a2018;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(236, 224, 214, 0.55);
+  stroke-width: 3px;
+  letter-spacing: 0.04em;
+}
+
+/* stations: glowing white dots */
+.station { cursor: pointer; }
+.station-glow {
+  fill: #ffffff;
+  opacity: 0.22;
+  filter: url(#st-glow);
+  animation: stpulse 3s ease-in-out infinite;
 }
 .station-core {
-  fill: var(--ink);
-  opacity: 0.9;
+  fill: #ffffff;
+  stroke: rgba(27, 60, 83, 0.6);
+  stroke-width: 0.6;
 }
-.station-label {
-  fill: var(--ink-dim);
-  font-size: 11px;
-  font-family: 'Zen Kaku Gothic New', sans-serif;
-  opacity: 0;
-  transition: opacity 0.3s;
-  paint-order: stroke;
-  stroke: rgba(18, 43, 61, 0.85);
-  stroke-width: 3px;
+.station:hover .station-glow { opacity: 0.4; }
+.station:hover .station-core { fill: var(--shape-bright); }
+@keyframes stpulse {
+  0%, 100% { opacity: 0.18; transform: scale(1); }
+  50% { opacity: 0.34; transform: scale(1.12); }
 }
-.station:hover .station-label { opacity: 1; }
 
 /* pins */
 .pin {
@@ -704,3 +698,36 @@ body {
   .hint { font-size: 11px; }
   .hud-bottom { padding: 16px; }
 }
+
+/* --------------------------------------------------------- station popup */
+.station-popup {
+  position: absolute;
+  z-index: 45;
+  min-width: 160px;
+  max-width: 230px;
+  background: linear-gradient(180deg, rgba(35, 76, 106, 0.97), rgba(24, 56, 78, 0.98));
+  border: 1px solid rgba(69, 104, 130, 0.6);
+  border-radius: 12px;
+  padding: 12px 14px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.sp-name {
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--shape);
+}
+.sp-name span { font-size: 12px; color: var(--ink-dim); margin-left: 2px; }
+.sp-lines { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.sp-line {
+  font-size: 11px;
+  color: var(--ink);
+  background: rgba(69, 104, 130, 0.45);
+  border: 1px solid rgba(69, 104, 130, 0.5);
+  border-radius: 100px;
+  padding: 3px 9px;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+}
+.sp-empty { font-size: 11px; color: var(--ink-dim); margin-top: 7px; }

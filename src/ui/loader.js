@@ -44,7 +44,7 @@ export function createLoader() {
       const loader = $('loader');
       const tl = gsap.timeline({
         onComplete: () => {
-          loader.style.display = 'none';
+          loader.remove(); // fully remove so nothing from the loader can show through
         },
       });
       tl.to('.loader-inner', { autoAlpha: 0, y: -24, duration: 0.6, ease: 'power2.in' })

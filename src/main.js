@@ -3,6 +3,9 @@ import { gsap } from 'gsap';
 import { geoContains } from 'd3-geo';
 import {
   loadGeo,
+  setViewport,
+  W,
+  H,
   loadMunicipality,
   getMunicipality,
   loadTown,
@@ -24,6 +27,7 @@ import {
   startAmbient,
   stopAmbient,
   settlePlinth,
+  applyViewport,
 } from './map/mapRenderer.js';
 import { state, setState } from './state.js';
 import { REGIONS, PREFECTURES, PREF_KEY_BY_ID, PREF_ID_TO_REGION } from './config.js';
@@ -65,6 +69,7 @@ const $ = (id) => document.getElementById(id);
   ];
   await preload(loader, tasks);
 
+  setViewport(window.innerWidth, window.innerHeight);
   initMap($('stage'), {
     onAreaTap: handleAreaTap,
     onLongPress: handleLongPress,
@@ -88,8 +93,14 @@ const $ = (id) => document.getElementById(id);
 })();
 
 function introSequence() {
-  flyTo({ k: 2.4, x: -1500, y: -1100 }, { duration: 0 });
-  return new Promise((r) => flyTo(frameFeatures(mainland(), 0.04), { duration: 2.0, onComplete: r }));
+  const target = frameFeatures(mainland(), 0.04);
+  // start over-zoomed but centred on the same point, then ease out
+  const f = 2.3;
+  const cx = (W / 2 - target.x) / target.k;
+  const cy = (H / 2 - target.y) / target.k;
+  const startK = target.k * f;
+  flyTo({ k: startK, x: W / 2 - cx * startK, y: H / 2 - cy * startK }, { duration: 0 });
+  return new Promise((r) => flyTo(target, { duration: 2.0, onComplete: r }));
 }
 
 function mainland() {
@@ -376,6 +387,27 @@ function onCrumb(key) {
   else if (key.startsWith('city:')) goCity(key.slice(5));
 }
 
+// Re-render the current level without animation (used after a viewport resize,
+// which changes the projection/canvas aspect).
+function redraw() {
+  switch (state.level) {
+    case 'region':
+      goRegion(state.regionKey, false);
+      break;
+    case 'prefecture':
+      goPrefecture(state.prefKey, false);
+      break;
+    case 'city':
+      goCity(state.cityKey, false);
+      break;
+    case 'ward':
+      goWard(state.wardKey, false);
+      break;
+    default:
+      goJapan(false);
+  }
+}
+
 function goBack() {
   hideStationPopup();
   if (state.level === 'ward') goCity(state.cityKey);
@@ -448,6 +480,17 @@ function wireControls() {
       else if (!$('settings').hidden) $('settings').querySelector('.panel-close')?.click();
       else goBack();
     }
+  });
+
+  // Re-fit the map when the viewport changes (rotation, resize, mobile chrome).
+  let rt;
+  window.addEventListener('resize', () => {
+    clearTimeout(rt);
+    rt = setTimeout(() => {
+      setViewport(window.innerWidth, window.innerHeight);
+      applyViewport();
+      redraw();
+    }, 150);
   });
 
   if (!hasFirebase) console.info('[SPOTS] Firebase not configured — pins stored in localStorage.');

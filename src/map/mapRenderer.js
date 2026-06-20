@@ -28,20 +28,16 @@ const ST_GLOW_R = 13;
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
-let aspectMode = 'meet'; // 'meet' (letterbox) on wide screens, 'slice' (fill) on tall/mobile
-
-function updateAspect() {
-  const r = svg.node().getBoundingClientRect();
-  // Fill the screen on portrait / narrow viewports so the map isn't tiny;
-  // letterbox on wide screens so all of Japan stays visible.
-  aspectMode = r.width / r.height < 1.35 ? 'slice' : 'meet';
-  svg.attr('preserveAspectRatio', `xMidYMid ${aspectMode}`);
+// The viewBox aspect matches the viewport (see geo.setViewport) so "meet" fills
+// the screen exactly — no cropping, no letterbox.
+export function applyViewport() {
+  svg.attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet');
   reposition();
 }
 
 export function initMap(svgEl, h) {
   handlers = h;
-  svg = select(svgEl).attr('viewBox', `0 0 ${W} ${H}`);
+  svg = select(svgEl).attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet');
 
   buildDefs();
 
@@ -70,8 +66,7 @@ export function initMap(svgEl, h) {
   pinsG = overlay.append('g').attr('class', 'pins');
 
   bindPointer(svgEl);
-  updateAspect();
-  window.addEventListener('resize', updateAspect);
+  applyViewport();
 }
 
 function buildDefs() {
@@ -99,7 +94,7 @@ function canvasToScreen(cx, cy) {
 }
 function viewScale() {
   const r = svg.node().getBoundingClientRect();
-  return aspectMode === 'slice' ? Math.max(r.width / W, r.height / H) : Math.min(r.width / W, r.height / H);
+  return Math.min(r.width / W, r.height / H);
 }
 function clientToCanvas(clientX, clientY) {
   const r = svg.node().getBoundingClientRect();
@@ -146,7 +141,7 @@ export const setPinning = (on) => (pinningEnabled = on);
 // ---------------------------------------------------------------------------
 export function renderAreas(areas, { baseFeature = null, showLabels = false } = {}) {
   const p = path();
-  renderedAreas = areas.map((a) => ({ ...a, centroid: p.centroid(a.feature) }));
+  renderedAreas = areas.map((a) => ({ ...a, centroid: p.centroid(a.feature), bounds: p.bounds(a.feature) }));
   baseFeat = baseFeature;
   extrudeG.selectAll('*').remove(); // plinth is drawn after the camera settles
 
@@ -305,10 +300,7 @@ export function setCurrentLocation(lonlat) {
 // Per-frame overlay positioning + label collision
 // ---------------------------------------------------------------------------
 function reposition() {
-  labelsG.selectAll('text.area-label').attr('transform', (d) => {
-    const [x, y] = canvasToScreen(d.centroid[0], d.centroid[1]);
-    return `translate(${x} ${y})`;
-  });
+  placeAreaLabels();
 
   const stPos = new Map();
   stationsG.selectAll('g.station').attr('transform', (d) => {
@@ -326,6 +318,38 @@ function reposition() {
   if (currentLoc) {
     const [x, y] = geoToScreen(currentLoc.lon, currentLoc.lat);
     locG.attr('transform', `translate(${x} ${y})`);
+  }
+}
+
+// Area labels: bigger segments win; hide a label if its segment is too small
+// on-screen to fit text, or if it would overlap an already-placed label. This
+// keeps dense wards (e.g. 京都市左京区) from being covered in text — more labels
+// reveal themselves as you zoom in.
+function placeAreaLabels() {
+  const sel = labelsG.selectAll('text.area-label');
+  if (sel.empty()) return;
+  const items = [];
+  sel.each(function (d) {
+    const sw = (d.bounds[1][0] - d.bounds[0][0]) * transform.k;
+    const sh = (d.bounds[1][1] - d.bounds[0][1]) * transform.k;
+    const [x, y] = canvasToScreen(d.centroid[0], d.centroid[1]);
+    items.push({ node: this, d, x, y, area: sw * sh, segMin: Math.min(sw, sh) });
+  });
+  items.sort((a, b) => b.area - a.area); // label large segments first
+  const placed = [];
+  const overlaps = (r) => placed.some((q) => !(r.x1 < q.x0 || r.x0 > q.x1 || r.y1 < q.y0 || r.y0 > q.y1));
+  for (const it of items) {
+    const label = it.d.label || '';
+    const w = label.length * 13 + 6;
+    const h = 16;
+    const show = it.segMin > 30 && it.x > -50 && it.x < W + 50 && it.y > -20 && it.y < H + 20;
+    const rect = { x0: it.x - w / 2, y0: it.y - h / 2, x1: it.x + w / 2, y1: it.y + h / 2 };
+    if (show && !overlaps(rect)) {
+      placed.push(rect);
+      select(it.node).style('display', null).attr('transform', `translate(${it.x} ${it.y})`);
+    } else {
+      select(it.node).style('display', 'none');
+    }
   }
 }
 
@@ -435,8 +459,19 @@ function clampPan() {
   transform.y = Math.max(Math.min(transform.y, 0.75 * H), 0.25 * H - H * k);
 }
 
+function zoomAround(clientX, clientY, k) {
+  k = Math.max(limits.min, Math.min(limits.max, k));
+  const [vx, vy] = clientToCanvas(clientX, clientY);
+  const ratio = k / transform.k;
+  transform.x = vx - (vx - transform.x) * ratio;
+  transform.y = vy - (vy - transform.y) * ratio;
+  transform.k = k;
+}
+
 function bindPointer(el) {
-  let down = null;
+  const pointers = new Map(); // pointerId -> {x,y}
+  let down = null; // single-pointer gesture bookkeeping (tap / long-press / pan)
+  let pinch = null; // { dist, mx, my }
   let lpTimer = null;
   const clearLP = () => {
     if (lpTimer) {
@@ -444,27 +479,55 @@ function bindPointer(el) {
       lpTimer = null;
     }
   };
+  const two = () => {
+    const [a, b] = [...pointers.values()];
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  };
 
   el.addEventListener('pointerdown', (e) => {
-    if (e.button != null && e.button !== 0) return;
-    gsap.killTweensOf(transform);
-    down = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false, fired: false };
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     el.setPointerCapture?.(e.pointerId);
-    if (pinningEnabled) {
-      lpTimer = setTimeout(() => {
-        if (down && !down.moved) {
-          down.fired = true;
-          handlers.onLongPress?.(screenToGeo(down.x, down.y), { clientX: down.x, clientY: down.y });
-        }
-      }, LONGPRESS_MS);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    gsap.killTweensOf(transform);
+
+    if (pointers.size === 1) {
+      down = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: false, fired: false };
+      if (pinningEnabled) {
+        lpTimer = setTimeout(() => {
+          if (down && !down.moved && pointers.size === 1) {
+            down.fired = true;
+            handlers.onLongPress?.(screenToGeo(down.x, down.y), { clientX: down.x, clientY: down.y });
+          }
+        }, LONGPRESS_MS);
+      }
+    } else if (pointers.size === 2) {
+      clearLP();
+      if (down) down.fired = true; // cancel tap/long-press once a second finger lands
+      pinch = two();
+      svg.node().classList.add('grabbing');
     }
   });
 
   el.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size >= 2 && pinch) {
+      const cur = two();
+      const scale = viewScale();
+      transform.x += (cur.mx - pinch.mx) / scale; // two-finger drag
+      transform.y += (cur.my - pinch.my) / scale;
+      if (pinch.dist > 0) zoomAround(cur.mx, cur.my, transform.k * (cur.dist / pinch.dist));
+      clampPan();
+      applyTransform();
+      pinch = cur;
+      return;
+    }
+
     if (!down) return;
-    const dx = e.clientX - down.x;
+    const dx = e.clientX - down.x; // per-move delta for panning
     const dy = e.clientY - down.y;
-    if (!down.moved && Math.hypot(dx, dy) > MOVE_THRESH) {
+    if (!down.moved && Math.hypot(e.clientX - down.sx, e.clientY - down.sy) > MOVE_THRESH) {
       down.moved = true;
       clearLP();
       svg.node().classList.add('grabbing');
@@ -475,17 +538,31 @@ function bindPointer(el) {
       transform.y += dy / scale;
       clampPan();
       applyTransform();
-      down.x = e.clientX;
-      down.y = e.clientY;
     }
+    down.x = e.clientX;
+    down.y = e.clientY;
   });
 
-  const endEv = (e) => {
+  const removePointer = (e) => {
+    const had = pointers.delete(e.pointerId);
+    if (!had) return;
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 1) {
+      // dropped from pinch to a single finger — continue panning from it
+      const [p] = [...pointers.values()];
+      down = { x: p.x, y: p.y, t: performance.now(), moved: true, fired: true };
+      svg.node().classList.add('grabbing');
+    } else if (pointers.size === 0) {
+      svg.node().classList.remove('grabbing');
+    }
+  };
+
+  el.addEventListener('pointerup', (e) => {
+    const wasDown = down;
+    const wasSize = pointers.size;
+    removePointer(e);
     clearLP();
-    svg.node().classList.remove('grabbing');
-    if (!down) return;
-    const isTap = !down.moved && !down.fired && performance.now() - down.t < 400;
-    if (isTap) {
+    if (wasSize === 1 && wasDown && !wasDown.moved && !wasDown.fired && performance.now() - wasDown.t < 400) {
       const tgt = document.elementFromPoint(e.clientX, e.clientY);
       const areaEl = tgt?.closest?.('.area');
       if (areaEl) {
@@ -493,13 +570,15 @@ function bindPointer(el) {
         if (d) handlers.onAreaTap?.(d.id);
       }
     }
-    down = null;
-  };
-  el.addEventListener('pointerup', endEv);
-  el.addEventListener('pointercancel', () => {
+    if (pointers.size === 0) down = null;
+  });
+  el.addEventListener('pointercancel', (e) => {
+    removePointer(e);
     clearLP();
-    down = null;
-    svg.node().classList.remove('grabbing');
+    if (pointers.size === 0) {
+      down = null;
+      svg.node().classList.remove('grabbing');
+    }
   });
 
   el.addEventListener(
@@ -507,13 +586,7 @@ function bindPointer(el) {
     (e) => {
       e.preventDefault();
       gsap.killTweensOf(transform);
-      const [vx, vy] = clientToCanvas(e.clientX, e.clientY);
-      let k = transform.k * Math.exp(-e.deltaY * 0.0015);
-      k = Math.max(limits.min, Math.min(limits.max, k));
-      const ratio = k / transform.k;
-      transform.x = vx - (vx - transform.x) * ratio;
-      transform.y = vy - (vy - transform.y) * ratio;
-      transform.k = k;
+      zoomAround(e.clientX, e.clientY, transform.k * Math.exp(-e.deltaY * 0.0015));
       clampPan();
       applyTransform();
     },

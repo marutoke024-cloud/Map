@@ -1,15 +1,35 @@
 import { geoMercator, geoPath } from 'd3-geo';
 import { feature, merge } from 'topojson-client';
 
-// Logical drawing size. The SVG fits the projection to this fixed canvas so
-// geo<->screen coordinates stay stable across every zoom level.
-export const W = 1600;
-export const H = 1000;
+// Drawing canvas. The aspect ratio tracks the viewport (via setViewport) so the
+// map fills the screen on any device without cropping or letterboxing.
+export let W = 1600;
+export let H = 1000;
 
 let _prefById = null; // prefecture id -> Feature (from japan.topojson)
 let _projection = null;
 let _path = null;
+let _mainland = null;
 const _muni = {}; // prefKey -> { cities:[...], byCity:Map }
+
+function fit() {
+  _projection = geoMercator().fitExtent(
+    [
+      [W * 0.06, H * 0.05],
+      [W * 0.94, H * 0.95],
+    ],
+    _mainland,
+  );
+  _path = geoPath(_projection);
+}
+
+// Recompute the canvas aspect from the viewport pixel size, then refit.
+export function setViewport(wpx, hpx) {
+  const a = Math.max(0.45, Math.min(3.2, wpx / hpx));
+  H = 1000;
+  W = Math.round(1000 * a);
+  if (_mainland) fit();
+}
 
 // ---------------------------------------------------------------------------
 // Base prefecture geometry + projection
@@ -23,20 +43,12 @@ export async function loadGeo() {
   _prefById = {};
   for (const f of fc.features) _prefById[f.properties.id] = f;
 
-  // Fit mainland (drop far-flung Okinawa id 47) into the canvas with padding so
-  // Hokkaido in the north is fully visible.
-  const mainland = {
+  // Fit mainland (drop far-flung Okinawa id 47) into the canvas with padding.
+  _mainland = {
     type: 'FeatureCollection',
     features: fc.features.filter((f) => f.properties.id !== 47),
   };
-  _projection = geoMercator().fitExtent(
-    [
-      [W * 0.06, H * 0.05],
-      [W * 0.94, H * 0.95],
-    ],
-    mainland,
-  );
-  _path = geoPath(_projection);
+  fit();
 }
 
 export const path = () => _path;

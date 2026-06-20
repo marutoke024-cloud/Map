@@ -1,19 +1,22 @@
 // Rail-station data from OpenStreetMap via the Overpass API.
 //
-// We fetch, for the bounding box of the deepest (leaf) area:
-//   - every railway=station node (name + position)
-//   - every rail route relation WITH geometry (route=train/subway/…)
-// then resolve "何線" per station by checking which route polylines pass close
-// to the station (membership linking in OSM is unreliable for Japanese data,
-// proximity is far more robust). Results cached in localStorage for 30 days.
+// For the bounding box of the deepest (leaf) area we fetch:
+//   - railway=station nodes (name + position)
+//   - rail route relations (route=train/subway/…) WITH geometry  → line names
+//   - named rail ways (railway=rail/…) WITH geometry             → line names
+// and resolve "何線" per station by which line geometry passes closest to it
+// (OSM membership linking is unreliable for Japan; proximity is robust). Both
+// relations and ways are used because Japanese data carries the line name on
+// one or the other depending on the operator. Cached 30 days.
 
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
 ];
-const CACHE_PREFIX = 'spots.stations.v3.';
+const CACHE_PREFIX = 'spots.stations.v4.';
 const TTL = 1000 * 60 * 60 * 24 * 30;
-const NEAR_M = 170; // a track within this distance counts as serving the station
+const NEAR_M = 200; // a line within this distance counts as serving the station
 
 function cacheGet(id) {
   try {
@@ -33,7 +36,9 @@ function buildQuery([[minLon, minLat], [maxLon, maxLat]]) {
   return `[out:json][timeout:60];
 node["railway"="station"](${bbox});
 out body;
-relation["route"~"train|subway|light_rail|monorail|tram"](${bbox});
+way["railway"~"^(rail|light_rail|subway|monorail|tram|narrow_gauge)$"](${bbox});
+out tags geom;
+relation["route"~"train|subway|light_rail|monorail|tram|railway"](${bbox});
 out tags geom;`;
 }
 
@@ -56,14 +61,19 @@ async function runOverpass(query) {
 }
 
 function lineName(tags = {}) {
-  // Prefer Japanese line name; fall back to operator + ref.
-  return tags['name:ja'] || tags['name'] || [tags['operator'], tags['ref']].filter(Boolean).join(' ') || tags['ref'] || '';
+  return (
+    tags['name:ja'] ||
+    tags['name'] ||
+    [tags['operator'], tags['ref']].filter(Boolean).join(' ') ||
+    tags['ref'] ||
+    ''
+  );
 }
 
-// metres between two [lon,lat] using an equirectangular approximation
+// metres between two [lon,lat] (equirectangular approximation)
 function distM(aLon, aLat, bLon, bLat) {
   const R = 6371000;
-  const x = ((bLon - aLon) * Math.PI) / 180 * Math.cos(((aLat + bLat) / 2) * Math.PI / 180);
+  const x = (((bLon - aLon) * Math.PI) / 180) * Math.cos((((aLat + bLat) / 2) * Math.PI) / 180);
   const y = ((bLat - aLat) * Math.PI) / 180;
   return R * Math.hypot(x, y);
 }
@@ -74,33 +84,36 @@ export async function loadStations(id, bbox) {
 
   const json = await runOverpass(buildQuery(bbox));
   const stations = [];
-  const routes = [];
+  const lines = []; // { name, pts:[[lon,lat],…] }
+
   for (const el of json.elements || []) {
     if (el.type === 'node' && el.tags?.railway === 'station' && el.tags?.name) {
       stations.push({ id: 'st_' + el.id, name: el.tags['name'], lon: el.lon, lat: el.lat, lines: [] });
+    } else if (el.type === 'way' && el.geometry) {
+      const name = lineName(el.tags);
+      if (name) lines.push({ name, pts: el.geometry.map((g) => [g.lon, g.lat]) });
     } else if (el.type === 'relation' && el.members) {
       const name = lineName(el.tags);
       if (!name) continue;
       const pts = [];
-      for (const m of el.members) {
-        if (m.geometry) for (const g of m.geometry) pts.push([g.lon, g.lat]);
-      }
-      if (pts.length) routes.push({ name, pts });
+      for (const m of el.members) if (m.geometry) for (const g of m.geometry) pts.push([g.lon, g.lat]);
+      if (pts.length) lines.push({ name, pts });
     }
   }
 
-  // assign lines by proximity (sampling track vertices keeps it fast)
   for (const s of stations) {
-    for (const r of routes) {
+    for (const ln of lines) {
+      if (s.lines.includes(ln.name)) continue;
       let near = false;
-      for (let i = 0; i < r.pts.length; i += 1) {
-        if (distM(s.lon, s.lat, r.pts[i][0], r.pts[i][1]) < NEAR_M) {
+      for (let i = 0; i < ln.pts.length; i++) {
+        if (distM(s.lon, s.lat, ln.pts[i][0], ln.pts[i][1]) < NEAR_M) {
           near = true;
           break;
         }
       }
-      if (near && !s.lines.includes(r.name)) s.lines.push(r.name);
+      if (near) s.lines.push(ln.name);
     }
+    s.lines.sort((a, b) => a.length - b.length);
   }
 
   cacheSet(id, stations);

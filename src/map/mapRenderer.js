@@ -13,6 +13,7 @@ let pinningEnabled = false;
 let renderedStations = [];
 let renderedPins = [];
 let renderedAreas = [];
+let baseFeat = null;
 let currentLoc = null; // {lon,lat}
 let ambientRAF = null;
 let ambientParticles = [];
@@ -27,9 +28,20 @@ const ST_GLOW_R = 13;
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
+let aspectMode = 'meet'; // 'meet' (letterbox) on wide screens, 'slice' (fill) on tall/mobile
+
+function updateAspect() {
+  const r = svg.node().getBoundingClientRect();
+  // Fill the screen on portrait / narrow viewports so the map isn't tiny;
+  // letterbox on wide screens so all of Japan stays visible.
+  aspectMode = r.width / r.height < 1.35 ? 'slice' : 'meet';
+  svg.attr('preserveAspectRatio', `xMidYMid ${aspectMode}`);
+  reposition();
+}
+
 export function initMap(svgEl, h) {
   handlers = h;
-  svg = select(svgEl).attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet');
+  svg = select(svgEl).attr('viewBox', `0 0 ${W} ${H}`);
 
   buildDefs();
 
@@ -58,6 +70,8 @@ export function initMap(svgEl, h) {
   pinsG = overlay.append('g').attr('class', 'pins');
 
   bindPointer(svgEl);
+  updateAspect();
+  window.addEventListener('resize', updateAspect);
 }
 
 function buildDefs() {
@@ -85,7 +99,7 @@ function canvasToScreen(cx, cy) {
 }
 function viewScale() {
   const r = svg.node().getBoundingClientRect();
-  return Math.min(r.width / W, r.height / H);
+  return aspectMode === 'slice' ? Math.max(r.width / W, r.height / H) : Math.min(r.width / W, r.height / H);
 }
 function clientToCanvas(clientX, clientY) {
   const r = svg.node().getBoundingClientRect();
@@ -118,6 +132,7 @@ export function flyTo(target, { duration = 1.5, onComplete } = {}) {
     onUpdate: applyTransform,
     onComplete: () => {
       applyTransform();
+      settlePlinth(); // draw the plinth only once the camera has settled
       onComplete?.();
     },
   });
@@ -132,7 +147,8 @@ export const setPinning = (on) => (pinningEnabled = on);
 export function renderAreas(areas, { baseFeature = null, showLabels = false } = {}) {
   const p = path();
   renderedAreas = areas.map((a) => ({ ...a, centroid: p.centroid(a.feature) }));
-  drawExtrude(baseFeature);
+  baseFeat = baseFeature;
+  extrudeG.selectAll('*').remove(); // plinth is drawn after the camera settles
 
   areaG
     .selectAll('path.area')
@@ -142,10 +158,7 @@ export function renderAreas(areas, { baseFeature = null, showLabels = false } = 
         enter
           .append('path')
           .attr('class', (d) => 'area' + (d.kind ? ' area--' + d.kind : ''))
-          .attr('d', (d) => p(d.feature))
-          .each(function () {
-            gsap.fromTo(this, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: 'power2.out' });
-          }),
+          .attr('d', (d) => p(d.feature)),
       (update) => update.attr('class', (d) => 'area' + (d.kind ? ' area--' + d.kind : '')).attr('d', (d) => p(d.feature)),
       (exit) => exit.remove(),
     );
@@ -154,18 +167,17 @@ export function renderAreas(areas, { baseFeature = null, showLabels = false } = 
     .selectAll('text.area-label')
     .data(showLabels ? renderedAreas : [], (d) => d.id)
     .join(
-      (enter) =>
-        enter
-          .append('text')
-          .attr('class', 'area-label')
-          .text((d) => d.label)
-          .each(function () {
-            gsap.fromTo(this, { opacity: 0 }, { opacity: 1, duration: 0.8, delay: 0.3 });
-          }),
+      (enter) => enter.append('text').attr('class', 'area-label').text((d) => d.label),
       (update) => update.text((d) => d.label),
       (exit) => exit.remove(),
     );
   applyTransform();
+}
+
+// Draw the extruded plinth for the current base feature. Called once the
+// fly-to settles (drawing it during the zoom caused shimmering on zoom-out).
+export function settlePlinth() {
+  drawExtrude(baseFeat);
 }
 
 function drawExtrude(feat) {
@@ -179,7 +191,7 @@ function drawExtrude(feat) {
   for (let i = DEPTH_STEPS; i >= 1; i--) {
     g.append('path').attr('d', d).attr('class', 'extrude-wall').attr('transform', `translate(${stepDx * i} ${stepDy * i})`);
   }
-  gsap.fromTo(extrudeG.node(), { opacity: 0 }, { opacity: 1, duration: 0.8, ease: 'power2.out' });
+  gsap.fromTo(extrudeG.node(), { opacity: 0 }, { opacity: 1, duration: 0.45, ease: 'power2.out' });
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +209,11 @@ export function renderStations(list) {
         });
         g.append('circle').attr('class', 'station-glow').attr('r', ST_GLOW_R);
         g.append('circle').attr('class', 'station-core').attr('r', ST_CORE_R);
+        g.on('click', function (event, d) {
+          event.stopPropagation();
+          handlers.onStationClick?.(d, event);
+        });
+        g.on('pointerdown', (event) => event.stopPropagation());
         return g;
       },
       (update) => update,

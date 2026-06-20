@@ -23,6 +23,7 @@ import {
   setCurrentLocation,
   startAmbient,
   stopAmbient,
+  settlePlinth,
 } from './map/mapRenderer.js';
 import { state, setState } from './state.js';
 import { REGIONS, PREFECTURES, PREF_KEY_BY_ID, PREF_ID_TO_REGION } from './config.js';
@@ -40,6 +41,8 @@ import {
   setBackVisible,
   renderDrawer,
   closeDrawer,
+  showStationPopup,
+  hideStationPopup,
 } from './ui/hud.js';
 import { hasFirebase } from './firebase.js';
 
@@ -66,6 +69,7 @@ const $ = (id) => document.getElementById(id);
     onAreaTap: handleAreaTap,
     onLongPress: handleLongPress,
     onPinClick: handlePinClick,
+    onStationClick: (s, e) => showStationPopup(s, e.clientX, e.clientY),
   });
   initPanel($('panel'), {
     onSaved: handlePinSaved,
@@ -241,6 +245,7 @@ async function enterLeaf(feat, label, stationId, animate, code) {
       segs.map((s, i) => ({ id: 'town:' + i, feature: s.feature, label: s.name, kind: 'town' })),
       { baseFeature: feat, showLabels: true },
     );
+    settlePlinth(); // re-draw the plinth under the freshly rendered town segments
   }
 }
 
@@ -372,6 +377,7 @@ function onCrumb(key) {
 }
 
 function goBack() {
+  hideStationPopup();
   if (state.level === 'ward') goCity(state.cityKey);
   else if (state.level === 'city') goPrefecture(state.prefKey);
   else if (state.level === 'prefecture') goRegion(state.regionKey);

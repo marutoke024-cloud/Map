@@ -51,7 +51,8 @@ body {
 
 /* area tiles (prefecture / city / ward). Crisp dark borders make boundaries
    clearly readable; brightness change on hover, no blurry glow. */
-.areas { stroke: #16344a; stroke-linejoin: round; }
+.areas { stroke: #16344a; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+.extrude { shape-rendering: geometricPrecision; }
 .area {
   fill: #2c5169;
   transition: fill 0.35s var(--ease), opacity 0.5s var(--ease);

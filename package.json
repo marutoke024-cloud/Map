@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "render:still": "node scripts/render-still.mjs"
+    "render:still": "node scripts/render-still.mjs",
+    "town": "node scripts/fetch-town.mjs"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",
@@ -19,6 +20,8 @@
   },
   "devDependencies": {
     "sharp": "^0.35.2",
+    "topojson-server": "^3.0.1",
+    "topojson-simplify": "^3.0.3",
     "vite": "^5.3.1"
   }
 }

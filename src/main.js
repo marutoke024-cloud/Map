@@ -5,6 +5,7 @@ import {
   loadGeo,
   loadMunicipality,
   getMunicipality,
+  loadTown,
   featureById,
   allFeatures,
   frameFeatures,
@@ -30,6 +31,7 @@ import { loadStations } from './stations/stations.js';
 import { initPanel, openPanel, closePanel } from './pins/pinPanel.js';
 import { initSettings, openSettings } from './ui/settings.js';
 import { initSearch } from './ui/search.js';
+import { createLoader, preload } from './ui/loader.js';
 import {
   setBreadcrumb,
   showStageTitle,
@@ -47,14 +49,24 @@ const $ = (id) => document.getElementById(id);
 // Boot
 // ---------------------------------------------------------------------------
 (async function boot() {
-  await loadGeo();
+  const loader = createLoader();
+
+  // Real 0→100% progress: map outline, every prefecture's municipalities, fonts.
+  const tasks = [
+    { label: 'loading map', run: loadGeo },
+    ...Object.keys(PREFECTURES).map((k) => ({
+      label: `loading ${PREFECTURES[k].en}`,
+      run: () => loadMunicipality(k),
+    })),
+    { label: 'fonts', run: () => (document.fonts ? document.fonts.ready : Promise.resolve()) },
+  ];
+  await preload(loader, tasks);
 
   initMap($('stage'), {
     onAreaTap: handleAreaTap,
     onLongPress: handleLongPress,
     onPinClick: handlePinClick,
   });
-
   initPanel($('panel'), {
     onSaved: handlePinSaved,
     onDeleted: handlePinDeleted,
@@ -65,15 +77,11 @@ const $ = (id) => document.getElementById(id);
   state.pins = await loadPins();
   wireControls();
 
-  await introSequence();
-  goJapan(false);
-  hideLoader();
+  goJapan(false); // build the Japan view beneath the loader
+  const introP = introSequence(); // begin the cinematic fly-in
+  await loader.finish(); // curtain reveal
+  await introP;
 })();
-
-function hideLoader() {
-  const l = $('loader');
-  gsap.to(l, { autoAlpha: 0, duration: 0.8, onComplete: () => (l.style.display = 'none') });
-}
 
 function introSequence() {
   flyTo({ k: 2.4, x: -1500, y: -1100 }, { duration: 0 });
@@ -188,7 +196,7 @@ async function goCity(cityKey, animate = true) {
     setHint('Tap a ward (区) to enter');
   } else {
     // leaf municipality: stations + pins here
-    enterLeaf(city.feature, city.ja, `${state.prefKey}:${cityKey}`, animate);
+    enterLeaf(city.feature, city.ja, `${state.prefKey}:${cityKey}`, animate, city.code);
   }
   setBackVisible(true);
   setScaleLabel(PREFECTURES[state.prefKey].en);
@@ -203,7 +211,7 @@ function goWard(wardKey, animate = true) {
   const ward = city?.wardUnits?.find((w) => w.key === wardKey);
   if (!ward) return;
   setState({ level: 'ward', wardKey });
-  enterLeaf(ward.feature, ward.ja, `${state.prefKey}:${state.cityKey}:${wardKey}`, animate);
+  enterLeaf(ward.feature, ward.ja, `${state.prefKey}:${state.cityKey}:${wardKey}`, animate, ward.code);
   setBackVisible(true);
   setScaleLabel(city.ja);
   showStageTitle(ward.ja, city.ja);
@@ -211,8 +219,9 @@ function goWard(wardKey, animate = true) {
   refreshPins();
 }
 
-// Shared leaf entry: extruded block, stations, pin placement enabled.
-function enterLeaf(feat, label, stationId, animate) {
+// Shared leaf entry: extruded block subdivided into 町丁目 segments (when town
+// data is bundled), stations, pin placement enabled.
+async function enterLeaf(feat, label, stationId, animate, code) {
   state.leafFeature = feat;
   renderAreas([{ id: 'leaf', feature: feat, label, kind: 'leaf' }], {
     baseFeature: feat,
@@ -224,6 +233,15 @@ function enterLeaf(feat, label, stationId, animate) {
   setPinning(true);
   setHint('Long-press the map to drop a spot · drag to pan');
   loadStationsFor(stationId, feat);
+
+  // Lazy-load 町丁目 segments and overlay them once available.
+  const segs = await loadTown(code);
+  if (segs && segs.length && state.leafFeature === feat) {
+    renderAreas(
+      segs.map((s, i) => ({ id: 'town:' + i, feature: s.feature, label: s.name, kind: 'town' })),
+      { baseFeature: feat, showLabels: true },
+    );
+  }
 }
 
 // Keep only stations whose point falls inside the selected area polygon, so

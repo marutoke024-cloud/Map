@@ -79,10 +79,13 @@ export async function loadMunicipality(prefKey) {
       ? c.geoms.map((g) => ({
           key: g.properties.N03_004,
           ja: g.properties.N03_004,
+          code: g.properties.N03_007, // 5-digit municipal code (e.g. 27106)
           feature: feature(topo, g),
         }))
       : null;
-    return { key: c.key, ja: c.ja, designated: c.designated, feature: cityFeature, wardUnits };
+    // leaf municipalities (non-designated) carry their own code for town data
+    const code = c.designated ? null : c.geoms[0].properties.N03_007;
+    return { key: c.key, ja: c.ja, designated: c.designated, code, feature: cityFeature, wardUnits };
   });
 
   cities.sort((a, b) => a.ja.localeCompare(b.ja, 'ja'));
@@ -91,6 +94,33 @@ export async function loadMunicipality(prefKey) {
 }
 
 export const getMunicipality = (prefKey) => _muni[prefKey];
+
+// ---------------------------------------------------------------------------
+// Town (町丁目) segments for a leaf area, derived from e-Stat small-area data.
+// Bundled per municipal code at public/data/town/{code}.topojson. Returns an
+// array of { name, feature } or null when no town data is bundled for that code.
+// ---------------------------------------------------------------------------
+const _town = {};
+export async function loadTown(code) {
+  if (!code) return null;
+  if (code in _town) return _town[code];
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}data/town/${code}.topojson`);
+    if (!res.ok) {
+      _town[code] = null;
+      return null;
+    }
+    const topo = await res.json();
+    const objName = Object.keys(topo.objects)[0];
+    const fc = feature(topo, topo.objects[objName]);
+    const segs = fc.features.map((f) => ({ name: f.properties.name || '', feature: f }));
+    _town[code] = segs;
+    return segs;
+  } catch {
+    _town[code] = null;
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Framing — ignores tiny distant islands so a prefecture/city frames tightly

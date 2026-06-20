@@ -19,12 +19,18 @@
 import { topology } from 'topojson-server';
 import { mergeArcs } from 'topojson-client';
 import { presimplify, simplify } from 'topojson-simplify';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 
 const REF = 'master';
 const REPO = 'geolonia/japanese-boundaries';
+const RAW = `https://raw.githubusercontent.com/${REPO}/${REF}`;
 const OUT = 'public/data/town';
+const MANIFEST = 'scripts/town-manifest.json';
 const TOKEN = process.env.GITHUB_TOKEN || '';
+
+// Optional manifest: { "27106": ["001002", ...] } lets us skip the rate-limited
+// contents API entirely and fetch each 小地域 directly from raw (unmetered).
+const manifest = existsSync(MANIFEST) ? JSON.parse(readFileSync(MANIFEST, 'utf8')) : {};
 
 const args = process.argv.slice(2);
 const force = args.includes('--force');
@@ -73,10 +79,18 @@ async function buildCode(code) {
   }
   const pref2 = code.slice(0, 2);
   const city3 = code.slice(2);
-  const list = await gh(
-    `https://api.github.com/repos/${REPO}/contents/data/japan/${pref2}/${city3}?ref=${REF}`,
-  );
-  const files = list.filter((f) => f.name.endsWith('.geojson'));
+  let files;
+  if (manifest[code]) {
+    files = manifest[code].map((a) => ({
+      name: a + '.geojson',
+      download_url: `${RAW}/data/japan/${pref2}/${city3}/${a}.geojson`,
+    }));
+  } else {
+    const list = await gh(
+      `https://api.github.com/repos/${REPO}/contents/data/japan/${pref2}/${city3}?ref=${REF}`,
+    );
+    files = list.filter((f) => f.name.endsWith('.geojson'));
+  }
   if (!files.length) {
     console.warn(`! ${code} no area files`);
     return;

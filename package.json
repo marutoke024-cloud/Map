@@ -1,0 +1,24 @@
+{
+  "name": "favorite-spots-map",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "お気に入りスポット記録アプリ — hierarchical SVG map of Japan with dramatic zoom",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "render:still": "node scripts/render-still.mjs"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "d3-selection": "^3.0.0",
+    "firebase": "^10.12.2",
+    "gsap": "^3.12.5",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.2",
+    "vite": "^5.3.1"
+  }
+}

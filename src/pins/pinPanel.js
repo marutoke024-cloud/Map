@@ -1,0 +1,240 @@
+// The slide-in detail panel used to create and edit a pin.
+
+import { addPin, updatePin, deletePin } from './pinStore.js';
+import { resolveByUrl, searchByKeyword } from '../integrations/hotpepper.js';
+import { PREFECTURES } from '../config.js';
+
+const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
+
+let el;
+let onSavedCb, onDeletedCb, onCloseCb;
+
+export function initPanel(panelEl, { onSaved, onDeleted, onClose }) {
+  el = panelEl;
+  onSavedCb = onSaved;
+  onDeletedCb = onDeleted;
+  onCloseCb = onClose;
+}
+
+function esc(s = '') {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+/**
+ * Open the panel.
+ * @param {object} pin  existing pin OR a draft {prefKey, lon, lat} for new pins.
+ * @param {boolean} isNew
+ */
+export function openPanel(pin, isNew) {
+  const draft = { category: 'Restaurant', locked: false, ...pin };
+  const prefName = PREFECTURES[draft.prefKey]?.ja || '';
+
+  el.hidden = false;
+  el.classList.remove('closing');
+  el.innerHTML = `
+    <div class="panel-grip"></div>
+    <button class="panel-close" aria-label="Close">×</button>
+    <div class="panel-eyebrow">${isNew ? 'NEW SPOT' : 'EDIT SPOT'} · <span>${esc(prefName)}</span></div>
+
+    <div class="hp-block">
+      <label class="field-label">HotPepper Gourmet</label>
+      <div class="hp-row">
+        <input class="input" id="hp-url" placeholder="Paste shop URL or keyword…" />
+        <button class="btn btn-ghost" id="hp-go">Fetch</button>
+      </div>
+      <div class="hp-status" id="hp-status"></div>
+      <div class="hp-results" id="hp-results"></div>
+    </div>
+
+    <label class="field-label">Name 店名</label>
+    <input class="input" id="f-name" value="${esc(draft.name || '')}" placeholder="お店の名前" />
+
+    <label class="field-label">Category</label>
+    <div class="chips" id="f-cat">
+      ${CATEGORIES.map((c) => `<button class="chip ${draft.category === c ? 'on' : ''}" data-c="${c}">${c}</button>`).join('')}
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Budget 予算</label>
+        <input class="input" id="f-budget" value="${esc(draft.budget || '')}" placeholder="¥2,000" />
+      </div>
+      <div>
+        <label class="field-label">Address 住所</label>
+        <input class="input" id="f-address" value="${esc(draft.address || '')}" placeholder="住所" />
+      </div>
+    </div>
+
+    <label class="field-label">Memo</label>
+    <textarea class="input textarea" id="f-memo" placeholder="メモ・感想">${esc(draft.memo || '')}</textarea>
+
+    <label class="field-label">Photo</label>
+    <div class="photo-row">
+      <label class="btn btn-ghost">Upload<input type="file" id="f-photo" accept="image/*" hidden /></label>
+      <div class="photo-preview" id="photo-preview">${draft.photo ? `<img src="${esc(draft.photo)}" />` : ''}</div>
+    </div>
+
+    <button class="lock-toggle ${draft.locked ? 'on' : ''}" id="f-lock">
+      <span class="lock-ico"></span>
+      <span class="lock-text">${draft.locked ? 'Locked · private only' : 'Public spot'}</span>
+    </button>
+
+    <div class="panel-actions">
+      ${isNew ? '' : '<button class="btn btn-danger" id="f-delete">Delete</button>'}
+      <button class="btn btn-primary" id="f-save">${isNew ? 'Add spot' : 'Save'}</button>
+    </div>
+    <div class="credit">Powered by ホットペッパー Webサービス</div>
+  `;
+
+  // ----- wiring -----
+  const $ = (s) => el.querySelector(s);
+  let state = { ...draft };
+
+  const close = () => closePanel();
+  $('.panel-close').onclick = close;
+
+  $('#f-cat').onclick = (e) => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    state.category = b.dataset.c;
+    $('#f-cat').querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', c === b));
+  };
+
+  $('#f-lock').onclick = () => {
+    state.locked = !state.locked;
+    $('#f-lock').classList.toggle('on', state.locked);
+    $('#f-lock .lock-text').textContent = state.locked ? 'Locked · private only' : 'Public spot';
+  };
+
+  $('#f-photo').onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      state.photo = r.result;
+      $('#photo-preview').innerHTML = `<img src="${state.photo}" />`;
+    };
+    r.readAsDataURL(file);
+  };
+
+  // HotPepper fetch
+  $('#hp-go').onclick = async () => {
+    const q = $('#hp-url').value.trim();
+    if (!q) return;
+    const status = $('#hp-status');
+    const results = $('#hp-results');
+    results.innerHTML = '';
+    status.textContent = 'Searching…';
+    status.className = 'hp-status loading';
+    try {
+      if (/hotpepper\.jp/i.test(q) || /strJ/i.test(q)) {
+        const shop = await resolveByUrl(q);
+        applyShop(shop);
+        status.textContent = `Loaded: ${shop.name}`;
+        status.className = 'hp-status ok';
+      } else {
+        const shops = await searchByKeyword(q);
+        status.textContent = shops.length ? `${shops.length} results — pick one` : 'No results';
+        status.className = 'hp-status ' + (shops.length ? 'ok' : '');
+        results.innerHTML = shops
+          .map(
+            (s, i) => `<button class="hp-card" data-i="${i}">
+              ${s.photo ? `<img src="${esc(s.photo)}" />` : '<div class="hp-noimg"></div>'}
+              <div><strong>${esc(s.name)}</strong><span>${esc(s.category)} · ${esc(s.budget)}</span><span>${esc(s.address)}</span></div>
+            </button>`,
+          )
+          .join('');
+        results.querySelectorAll('.hp-card').forEach((c) =>
+          c.addEventListener('click', () => {
+            applyShop(shops[+c.dataset.i]);
+            status.textContent = `Loaded: ${shops[+c.dataset.i].name}`;
+            results.innerHTML = '';
+          }),
+        );
+      }
+    } catch (err) {
+      status.textContent = '⚠ ' + err.message;
+      status.className = 'hp-status err';
+    }
+  };
+
+  function applyShop(shop) {
+    state.name = shop.name;
+    state.address = shop.address;
+    state.budget = shop.budget;
+    state.hotpepperId = shop.id;
+    state.hotpepperUrl = shop.url;
+    if (shop.category && !CATEGORIES.includes(state.category)) state.category = 'Restaurant';
+    if (shop.photo) {
+      state.photo = shop.photo;
+      $('#photo-preview').innerHTML = `<img src="${esc(shop.photo)}" />`;
+    }
+    $('#f-name').value = shop.name || '';
+    $('#f-address').value = shop.address || '';
+    $('#f-budget').value = shop.budget || '';
+  }
+
+  $('#f-save').onclick = async () => {
+    state.name = $('#f-name').value.trim() || 'Untitled';
+    state.budget = $('#f-budget').value.trim();
+    state.address = $('#f-address').value.trim();
+    state.memo = $('#f-memo').value.trim();
+    $('#f-save').disabled = true;
+    $('#f-save').textContent = 'Saving…';
+    let saved;
+    if (isNew) {
+      saved = await addPin({
+        prefKey: state.prefKey,
+        lon: state.lon,
+        lat: state.lat,
+        name: state.name,
+        category: state.category,
+        memo: state.memo,
+        budget: state.budget,
+        address: state.address,
+        photo: state.photo || null,
+        hotpepperId: state.hotpepperId || null,
+        hotpepperUrl: state.hotpepperUrl || null,
+        locked: state.locked,
+      });
+    } else {
+      const patch = {
+        name: state.name,
+        category: state.category,
+        memo: state.memo,
+        budget: state.budget,
+        address: state.address,
+        photo: state.photo || null,
+        hotpepperId: state.hotpepperId || null,
+        hotpepperUrl: state.hotpepperUrl || null,
+        locked: state.locked,
+      };
+      await updatePin(state.id, patch);
+      saved = { ...state, ...patch };
+    }
+    onSavedCb?.(saved, isNew);
+    closePanel();
+  };
+
+  const del = $('#f-delete');
+  if (del)
+    del.onclick = async () => {
+      await deletePin(state.id);
+      onDeletedCb?.(state.id);
+      closePanel();
+    };
+
+  requestAnimationFrame(() => el.classList.add('open'));
+}
+
+export function closePanel() {
+  if (!el || el.hidden) return;
+  el.classList.remove('open');
+  el.classList.add('closing');
+  onCloseCb?.();
+  setTimeout(() => {
+    el.hidden = true;
+    el.classList.remove('closing');
+    el.innerHTML = '';
+  }, 360);
+}

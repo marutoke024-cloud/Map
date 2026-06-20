@@ -1,14 +1,32 @@
 // HotPepper Gourmet (Recruit Web Service) client.
 //
-// Calls go through the same-origin `/api/hotpepper` proxy (see vite.config.js /
-// README) which injects the API key. Two entry points per the spec:
-//   1. resolveByUrl  — pull the shop id out of a HotPepper URL, then fetch it.
-//   2. searchByKeyword — keyword/area search returning candidates to pick from.
+// Two runtime modes:
+//   1. Dev server  — calls the same-origin `/api/hotpepper` proxy (vite.config.js)
+//      which injects the key server-side.
+//   2. Static host (GitHub Pages) — no server, so the user stores their own API
+//      key via Settings (localStorage) and we call the Recruit API through a
+//      CORS proxy. Personal-use only, per the API terms.
 
-const PROXY = '/api/hotpepper';
+const DEV_PROXY = '/api/hotpepper';
+const RECRUIT = 'https://webservice.recruit.co.jp/hotpepper/gourmet/v1/';
 
-// HotPepper shop pages look like https://www.hotpepper.jp/strJ001234567/ or
-// .../strJ001234567/ — the id is the `J` code after `str`.
+export const settings = {
+  get key() {
+    return localStorage.getItem('spots.hotpepper.key') || '';
+  },
+  set key(v) {
+    localStorage.setItem('spots.hotpepper.key', v || '');
+  },
+  get proxy() {
+    return localStorage.getItem('spots.hotpepper.proxy') || 'https://corsproxy.io/?url=';
+  },
+  set proxy(v) {
+    localStorage.setItem('spots.hotpepper.proxy', v || '');
+  },
+};
+
+export const hasClientKey = () => Boolean(settings.key);
+
 export function extractShopId(url) {
   if (!url) return null;
   const m = String(url).match(/str(J\d{9,})/i);
@@ -30,11 +48,19 @@ function normalize(shop) {
 }
 
 async function call(params) {
-  const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${PROXY}?${qs}`);
+  let res;
+  if (settings.key) {
+    const qs = new URLSearchParams({ ...params, key: settings.key, format: 'json' }).toString();
+    const target = `${RECRUIT}?${qs}`;
+    const url = settings.proxy + encodeURIComponent(target);
+    res = await fetch(url);
+  } else {
+    const qs = new URLSearchParams(params).toString();
+    res = await fetch(`${DEV_PROXY}?${qs}`);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HotPepper API error (${res.status})`);
+    throw new Error(body.error || `HotPepper API error (${res.status}). Set an API key in Settings.`);
   }
   const data = await res.json();
   return data.results?.shop || [];

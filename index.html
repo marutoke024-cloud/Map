@@ -29,6 +29,13 @@
           <span class="brand-sub">ATLAS</span>
         </div>
         <nav class="breadcrumb" id="breadcrumb" aria-label="Navigation"></nav>
+
+        <div class="searchbar" id="searchbar">
+          <span class="search-ico"></span>
+          <input id="search-input" placeholder="Search spots — name, budget, station…" autocomplete="off" />
+          <button class="search-clear" id="search-clear" hidden>×</button>
+        </div>
+
         <div class="hud-controls">
           <button class="icon-btn" id="btn-private" title="Toggle private mode" aria-pressed="false">
             <span class="icon-lock"></span>
@@ -38,8 +45,19 @@
             <span class="icon-rail"></span>
             <span class="icon-label">STATIONS</span>
           </button>
+          <button class="icon-btn" id="btn-locate" title="Show my location">
+            <span class="icon-gps"></span>
+            <span class="icon-label">GPS</span>
+          </button>
+          <button class="icon-btn" id="btn-settings" title="Settings">
+            <span class="icon-gear"></span>
+            <span class="icon-label">SETTINGS</span>
+          </button>
         </div>
       </header>
+
+      <!-- Search results dropdown -->
+      <div class="search-results" id="search-results" hidden></div>
 
       <!-- Back / hint -->
       <button class="back-btn" id="btn-back" hidden>
@@ -65,6 +83,9 @@
 
       <!-- Pin detail panel -->
       <aside class="panel" id="panel" hidden></aside>
+
+      <!-- Settings panel -->
+      <aside class="panel" id="settings" hidden></aside>
 
       <!-- Places list drawer -->
       <aside class="drawer" id="drawer" hidden></aside>

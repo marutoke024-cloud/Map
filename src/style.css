@@ -114,33 +114,76 @@ body {
   50% { opacity: 0.34; transform: scale(1.12); }
 }
 
-/* pins */
-.pin {
-  cursor: pointer;
+/* station name + line labels (constant screen size, collision-avoided in JS) */
+.st-label { pointer-events: none; }
+.st-name {
+  fill: #ffffff;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(12, 28, 40, 0.92);
+  stroke-width: 3.2px;
 }
+.st-line {
+  fill: #b9d4e6;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-size: 10px;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(12, 28, 40, 0.92);
+  stroke-width: 3px;
+}
+
+/* current location */
+.loc-dot {
+  fill: #5ec8ff;
+  stroke: #ffffff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px rgba(94, 200, 255, 0.9));
+}
+.loc-pulse {
+  fill: #5ec8ff;
+  opacity: 0.4;
+  animation: locpulse 1.8s ease-out infinite;
+  transform-origin: center;
+}
+@keyframes locpulse {
+  0% { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+
+/* ambient background particles (Japan view) */
+.ambient { opacity: 0; }
+.particle { fill: #cfe2ee; }
+
+/* pins — orange-red, 1.5x */
+.pin { cursor: pointer; }
+.pin-scale { transform: scale(1.5); }
 .pin-halo {
-  fill: var(--shape);
-  opacity: 0.12;
+  fill: #ff5a36;
+  opacity: 0.16;
   animation: pulse 2.6s ease-in-out infinite;
 }
 .pin-body {
-  fill: var(--shape);
-  stroke: #1b3c53;
-  stroke-width: 1.2;
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+  fill: #f4502e;
+  stroke: #2a0f08;
+  stroke-width: 1.1;
+  filter: drop-shadow(0 7px 12px rgba(0, 0, 0, 0.5));
   transition: fill 0.3s;
 }
-.pin-dot { fill: var(--bg-deep); }
-.pin-lock { stroke: var(--bg-deep); stroke-width: 1.4; }
-.pin.is-locked .pin-body { fill: #b9a08f; }
-.pin.is-active .pin-body { fill: var(--shape-bright); }
-.pin.is-active .pin-halo { opacity: 0.3; }
-.pin:hover .pin-body { fill: var(--shape-bright); }
+.pin-dot { fill: #fff3ee; }
+.pin-lock { stroke: #fff3ee; stroke-width: 1.4; }
+.pin.is-locked .pin-body { fill: #c2563f; }
+.pin.is-active .pin-body { fill: #ff7a4d; }
+.pin.is-active .pin-halo { opacity: 0.34; }
+.pin:hover .pin-body { fill: #ff6a44; }
 .pin--ghost { pointer-events: none; }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 0.12; }
-  50% { transform: scale(1.5); opacity: 0.02; }
+  0%, 100% { transform: scale(1); opacity: 0.16; }
+  50% { transform: scale(1.6); opacity: 0.03; }
 }
 @keyframes fadeIn { to { opacity: 1; } }
 
@@ -374,19 +417,31 @@ body {
   pointer-events: none;
   visibility: hidden;
 }
+/* High-contrast on both the dark ocean and the light landmass: warm off-white
+   fill with a deep-navy outline + soft glow (keeps the palette balanced). */
 .stage-title-ja {
   font-family: 'Zen Kaku Gothic New', sans-serif;
   font-weight: 700;
   font-size: clamp(40px, 9vw, 130px);
-  color: var(--shape);
-  text-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  color: #fbf4ec;
   letter-spacing: 0.1em;
+  text-shadow:
+    0 0 2px #14303f,
+    2px 0 2px #14303f,
+    -2px 0 2px #14303f,
+    0 2px 2px #14303f,
+    0 -2px 2px #14303f,
+    0 10px 38px rgba(8, 22, 33, 0.7);
 }
 .stage-title-en {
   font-size: clamp(11px, 1.2vw, 14px);
   letter-spacing: 0.6em;
-  color: var(--ink-dim);
-  margin-top: 12px;
+  color: #eaf1f6;
+  margin-top: 14px;
+  padding: 5px 14px;
+  background: rgba(20, 48, 63, 0.55);
+  border-radius: 100px;
+  backdrop-filter: blur(4px);
 }
 
 /* --------------------------------------------------------------- fx layers */
@@ -731,3 +786,123 @@ body {
   font-family: 'Zen Kaku Gothic New', sans-serif;
 }
 .sp-empty { font-size: 11px; color: var(--ink-dim); margin-top: 7px; }
+
+/* ------------------------------------------------------------- search bar */
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(35, 76, 106, 0.5);
+  border: 1px solid rgba(69, 104, 130, 0.5);
+  backdrop-filter: blur(10px);
+  border-radius: 100px;
+  padding: 8px 12px;
+  min-width: 220px;
+  max-width: 320px;
+  flex: 0 1 300px;
+}
+.searchbar:focus-within { border-color: var(--shape); }
+.search-ico {
+  width: 13px;
+  height: 13px;
+  border: 1.8px solid var(--ink-dim);
+  border-radius: 50%;
+  position: relative;
+  flex: none;
+}
+.search-ico::after {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 1.8px;
+  background: var(--ink-dim);
+  bottom: -2px;
+  right: -3px;
+  transform: rotate(45deg);
+}
+.searchbar input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  min-width: 0;
+}
+.searchbar input::placeholder { color: var(--ink-dim); }
+.search-clear {
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.search-clear:hover { color: var(--ink); }
+
+.search-results {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 80vw);
+  max-height: 56vh;
+  overflow-y: auto;
+  z-index: 30;
+  background: linear-gradient(180deg, rgba(35, 76, 106, 0.97), rgba(24, 56, 78, 0.98));
+  border: 1px solid rgba(69, 104, 130, 0.6);
+  border-radius: 14px;
+  padding: 8px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+}
+.sr-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.sr-row:hover { background: rgba(69, 104, 130, 0.35); }
+.sr-cat { font-size: 9px; letter-spacing: 0.1em; color: var(--bg-deep); background: var(--shape); padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
+.sr-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-meta { font-size: 11px; color: var(--ink-dim); font-family: 'Zen Kaku Gothic New'; white-space: nowrap; }
+.sr-empty { padding: 16px; color: var(--ink-dim); font-size: 13px; text-align: center; }
+
+/* gps + gear glyphs */
+.icon-gps {
+  width: 13px; height: 13px; position: relative; display: inline-block;
+  border: 1.8px solid currentColor; border-radius: 50%;
+}
+.icon-gps::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: currentColor; }
+.icon-gear {
+  width: 13px; height: 13px; display: inline-block; position: relative;
+  border: 1.8px solid currentColor; border-radius: 50%;
+}
+.icon-gear::after {
+  content: ''; position: absolute; inset: 3.5px; border-radius: 50%;
+  border: 1.6px solid currentColor;
+}
+
+/* settings panel */
+.settings-title { font-size: 17px; font-weight: 600; margin: 4px 0 10px; }
+.settings-note { font-size: 12px; line-height: 1.7; color: var(--ink-dim); margin-bottom: 6px; }
+.settings-note.small { font-size: 11px; }
+.settings-note a { color: var(--shape); }
+.settings-note code { background: rgba(18,43,61,0.6); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.muted { color: var(--ink-dim); font-weight: 400; }
+
+@media (max-width: 760px) {
+  .searchbar { display: none; }
+}

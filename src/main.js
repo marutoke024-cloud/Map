@@ -1,5 +1,6 @@
 import './style.css';
 import { gsap } from 'gsap';
+import { geoContains } from 'd3-geo';
 import {
   loadGeo,
   loadMunicipality,
@@ -12,20 +13,23 @@ import {
 import {
   initMap,
   flyTo,
-  getTransform,
   setZoomLimits,
   setPinning,
   renderAreas,
   renderStations,
   renderPins,
   flashPlacement,
-  screenToGeo,
+  setCurrentLocation,
+  startAmbient,
+  stopAmbient,
 } from './map/mapRenderer.js';
 import { state, setState } from './state.js';
 import { REGIONS, PREFECTURES, PREF_KEY_BY_ID, PREF_ID_TO_REGION } from './config.js';
 import { loadPins } from './pins/pinStore.js';
 import { loadStations } from './stations/stations.js';
 import { initPanel, openPanel, closePanel } from './pins/pinPanel.js';
+import { initSettings, openSettings } from './ui/settings.js';
+import { initSearch } from './ui/search.js';
 import {
   setBreadcrumb,
   showStageTitle,
@@ -34,8 +38,6 @@ import {
   setBackVisible,
   renderDrawer,
   closeDrawer,
-  showStationPopup,
-  hideStationPopup,
 } from './ui/hud.js';
 import { hasFirebase } from './firebase.js';
 
@@ -51,7 +53,6 @@ const $ = (id) => document.getElementById(id);
     onAreaTap: handleAreaTap,
     onLongPress: handleLongPress,
     onPinClick: handlePinClick,
-    onStationClick: handleStationClick,
   });
 
   initPanel($('panel'), {
@@ -59,6 +60,7 @@ const $ = (id) => document.getElementById(id);
     onDeleted: handlePinDeleted,
     onClose: () => setState({ activePinId: null }),
   });
+  initSettings($('settings'));
 
   state.pins = await loadPins();
   wireControls();
@@ -90,10 +92,10 @@ function applyLimits(frame, { minMul = 0.75, maxMul = 6 } = {}) {
 }
 
 function goJapan(animate = true) {
-  hideStationPopup();
   setState({ level: 'japan', regionKey: null, prefKey: null, cityKey: null, wardKey: null });
   setPinning(false);
   renderStations([]);
+  startAmbient();
   const areas = mainland().map((f) => ({
     id: f.properties.id,
     feature: f,
@@ -111,7 +113,7 @@ function goJapan(animate = true) {
 }
 
 function goRegion(regionKey, animate = true) {
-  hideStationPopup();
+  stopAmbient();
   const r = REGIONS[regionKey];
   setState({ level: 'region', regionKey, prefKey: null, cityKey: null, wardKey: null });
   setPinning(false);
@@ -135,7 +137,7 @@ function goRegion(regionKey, animate = true) {
 }
 
 async function goPrefecture(prefKey, animate = true) {
-  hideStationPopup();
+  stopAmbient();
   const p = PREFECTURES[prefKey];
   const regionKey = PREF_ID_TO_REGION[p.id];
   setState({ level: 'prefecture', regionKey, prefKey, cityKey: null, wardKey: null });
@@ -164,7 +166,6 @@ async function goPrefecture(prefKey, animate = true) {
 }
 
 async function goCity(cityKey, animate = true) {
-  hideStationPopup();
   const muni = getMunicipality(state.prefKey);
   const city = muni?.byCity.get(cityKey);
   if (!city) return;
@@ -197,7 +198,6 @@ async function goCity(cityKey, animate = true) {
 }
 
 function goWard(wardKey, animate = true) {
-  hideStationPopup();
   const muni = getMunicipality(state.prefKey);
   const city = muni?.byCity.get(state.cityKey);
   const ward = city?.wardUnits?.find((w) => w.key === wardKey);
@@ -213,6 +213,7 @@ function goWard(wardKey, animate = true) {
 
 // Shared leaf entry: extruded block, stations, pin placement enabled.
 function enterLeaf(feat, label, stationId, animate) {
+  state.leafFeature = feat;
   renderAreas([{ id: 'leaf', feature: feat, label, kind: 'leaf' }], {
     baseFeature: feat,
     showLabels: false,
@@ -225,17 +226,28 @@ function enterLeaf(feat, label, stationId, animate) {
   loadStationsFor(stationId, feat);
 }
 
+// Keep only stations whose point falls inside the selected area polygon, so
+// neighbouring stations just outside the ward are not shown.
+function clipStations(list, feat) {
+  return list.filter((s) => geoContains(feat, [s.lon, s.lat]));
+}
+
 async function loadStationsFor(id, feat) {
   if (!state.showStations) {
     renderStations([]);
+    return;
+  }
+  const cached = state.stations[id];
+  if (cached) {
+    renderStations(clipStations(cached, feat));
     return;
   }
   setHint('Loading stations from OpenStreetMap…');
   try {
     const list = await loadStations(id, geoBBox(feat));
     state.stations = { ...state.stations, [id]: list };
-    if (state.showStations) renderStations(list);
-    setHint('Long-press the map to drop a spot · tap a station for lines');
+    if (state.showStations && state.leafFeature === feat) renderStations(clipStations(list, feat));
+    setHint('Long-press the map to drop a spot · drag to pan');
   } catch (e) {
     console.warn('Overpass failed', e);
     setHint('Long-press the map to drop a spot (stations unavailable)');
@@ -297,15 +309,13 @@ function handlePinClick(pin) {
   openPanel(pin, false);
 }
 
-function handleStationClick(station, event) {
-  showStationPopup(station, event.clientX, event.clientY);
-}
-
 // ---------------------------------------------------------------------------
 // Data refresh
 // ---------------------------------------------------------------------------
 function refreshPins() {
-  renderPins(state.pins, { privateMode: state.privateMode, activeId: state.activePinId });
+  // Pins only appear once zoomed to a prefecture or deeper.
+  const visible = state.level === 'japan' || state.level === 'region' ? [] : state.pins;
+  renderPins(visible, { privateMode: state.privateMode, activeId: state.activePinId });
 }
 
 function handlePinSaved(pin, isNew) {
@@ -390,22 +400,73 @@ function wireControls() {
         const pin = state.pins.find((p) => p.id === id);
         if (!pin) return;
         closeDrawer();
-        goPrefecture(pin.prefKey);
-        setTimeout(() => handlePinClick(pin), 1700);
+        flyToPin(pin);
       },
       onClose: closeDrawer,
     });
   };
 
+  $('btn-settings').onclick = openSettings;
+  $('btn-locate').onclick = toggleLocate;
+
+  initSearch({
+    inputEl: $('search-input'),
+    clearEl: $('search-clear'),
+    resultsEl: $('search-results'),
+    getPins: () => state.pins,
+    privateRef: () => state.privateMode,
+    onPick: (pin) => flyToPin(pin),
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!$('panel').hidden) closePanel();
-      else {
-        hideStationPopup();
-        goBack();
-      }
+      else if (!$('settings').hidden) $('settings').querySelector('.panel-close')?.click();
+      else goBack();
     }
   });
 
   if (!hasFirebase) console.info('[SPOTS] Firebase not configured — pins stored in localStorage.');
+}
+
+// Navigate down to a pin's prefecture and open it.
+function flyToPin(pin) {
+  goPrefecture(pin.prefKey);
+  setTimeout(() => handlePinClick(pin), 1700);
+}
+
+// ---------------------------------------------------------------------------
+// Geolocation
+// ---------------------------------------------------------------------------
+let geoWatchId = null;
+function toggleLocate() {
+  const btn = $('btn-locate');
+  if (geoWatchId != null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+    btn.classList.remove('on');
+    setCurrentLocation(null);
+    return;
+  }
+  if (!navigator.geolocation) {
+    setHint('Geolocation is not available on this device');
+    return;
+  }
+  setHint('Locating…');
+  btn.classList.add('on');
+  geoWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const ll = [pos.coords.longitude, pos.coords.latitude];
+      setCurrentLocation(ll);
+      setHint('Current location shown on the map');
+    },
+    (err) => {
+      btn.classList.remove('on');
+      geoWatchId = null;
+      setCurrentLocation(null);
+      setHint('Location permission denied');
+      console.warn(err);
+    },
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
+  );
 }

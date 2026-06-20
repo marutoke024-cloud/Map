@@ -70,17 +70,22 @@ const wrap = (inner,title)=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
   writeFileSync('preview/osaka-wards.svg', wrap(base+tiles(wards,fr,true),
     `<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">… › OSAKA › 大阪市</text>`)); }
 
-// 3. Nishi-ku leaf + sample stations
+// 3. Nishi-ku leaf + bigger stations + labels + orange pin + title
 { const m=loadMuni('osaka'); const city=m.cities.find(c=>c.ja==='大阪市');
   const ward=city.wardUnits.find(w=>w.ja==='西区'); const fr=frame([ward.feature],0.22);
   const base=`<g transform="translate(${fr.x} ${fr.y}) scale(${fr.k})">${extrude(path(ward.feature),fr.k)}<path d="${path(ward.feature)}" fill="url(#t)" stroke="#1b3c53" stroke-width="${1.1/fr.k}"/></g>`;
-  // sample stations from ward centroid area
   const cen=path.centroid(ward.feature); const inv=proj.invert([cen[0],cen[1]]);
-  let st=''; for(let i=0;i<5;i++){ const lon=inv[0]+(i-2)*0.006, lat=inv[1]+((i%2)-0.5)*0.01;
+  const names=[['九条','地下鉄中央線'],['阿波座','地下鉄千日前線'],['西大橋','地下鉄長堀鶴見緑地線'],['本町','地下鉄御堂筋線']];
+  let st='';
+  for(let i=0;i<names.length;i++){ const lon=inv[0]+(i-1.5)*0.008, lat=inv[1]+((i%2)-0.5)*0.012;
     const px=proj([lon,lat]); const x=px[0]*fr.k+fr.x,y=px[1]*fr.k+fr.y;
-    st+=`<g transform="translate(${x} ${y})"><circle r="9" fill="#fff" opacity="0.22" filter="url(#g)"/><circle r="3.6" fill="#fff" stroke="rgba(27,60,83,0.6)" stroke-width="0.6"/></g>`; }
-  writeFileSync('preview/nishiku.svg', wrap(base+st,
-    `<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">… › 大阪市 › 西区</text>
-     <text x="${W/2}" y="${H-54}" fill="#9fb6c6" font-family="sans-serif" font-size="13" letter-spacing="3" text-anchor="middle">LONG-PRESS TO DROP A SPOT · TAP A STATION FOR LINES</text>`)); }
+    st+=`<g transform="translate(${x} ${y})"><circle r="13" fill="#fff" opacity="0.22" filter="url(#g)"/><circle r="5.5" fill="#fff" stroke="rgba(27,60,83,0.6)" stroke-width="0.6"/></g>`;
+    st+=`<g transform="translate(${x+11} ${y})"><text font-family="sans-serif" font-weight="700" font-size="12" fill="#fff" paint-order="stroke" stroke="rgba(12,28,40,0.92)" stroke-width="3.2" dominant-baseline="middle">${names[i][0]}駅</text><text y="13" font-family="sans-serif" font-size="10" fill="#b9d4e6" paint-order="stroke" stroke="rgba(12,28,40,0.92)" stroke-width="3" dominant-baseline="middle">${names[i][1]}</text></g>`; }
+  // orange-red 1.5x pin
+  const pp=proj([inv[0]+0.004,inv[1]+0.002]); const px=pp[0]*fr.k+fr.x,py=pp[1]*fr.k+fr.y;
+  const pin=`<g transform="translate(${px} ${py})"><circle r="22" fill="#ff5a36" opacity="0.16"/><g transform="scale(1.5)"><path d="M0,0 C-9,-12 -9,-22 0,-22 C9,-22 9,-12 0,0 Z" transform="translate(0,-2)" fill="#f4502e" stroke="#2a0f08" stroke-width="1.1"/><circle cy="-15" r="4" fill="#fff3ee"/></g></g>`;
+  const title=`<g><text x="${W/2}" y="${H/2}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="120" fill="#fbf4ec" paint-order="stroke" stroke="#14303f" stroke-width="4">西区</text></g>`;
+  writeFileSync('preview/nishiku.svg', wrap(base+st+pin,
+    `${title}<text x="60" y="64" fill="#eaf1f6" font-family="sans-serif" font-size="13" letter-spacing="3">… › 大阪市 › 西区</text>`)); }
 
 console.log('wrote osaka-cities / osaka-wards / nishiku');

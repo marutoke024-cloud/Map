@@ -1,6 +1,6 @@
 import { select } from 'd3-selection';
 import { gsap } from 'gsap';
-import { W, H, path, project, unproject, IDENTITY } from './geo.js';
+import { W, H, path, project, unproject, largestPart, IDENTITY } from './geo.js';
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -32,6 +32,7 @@ const ST_GLOW_R = 13;
 // the screen exactly — no cropping, no letterbox.
 export function applyViewport() {
   svg.attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet');
+  svg.select('#vp-rect').attr('width', W + 80).attr('height', H + 80);
   reposition();
 }
 
@@ -41,20 +42,12 @@ export function initMap(svgEl, h) {
 
   buildDefs();
 
-  const grid = svg.append('g').attr('class', 'ocean-grid');
-  for (let i = -4; i <= 28; i++) {
-    grid
-      .append('line')
-      .attr('x1', (i * W) / 24)
-      .attr('y1', -H)
-      .attr('x2', (i * W) / 24 - W * 0.3)
-      .attr('y2', H * 2)
-      .attr('class', 'grid-line');
-  }
-
   ambientG = svg.append('g').attr('class', 'ambient');
 
-  zoomG = svg.append('g').attr('class', 'zoom');
+  // Clip the zoomable content to the canvas so far-off geometry (e.g. Tokyo's
+  // distant islands) isn't rasterised at huge transformed coordinates, which
+  // flickers on mobile GPUs.
+  zoomG = svg.append('g').attr('class', 'zoom').attr('clip-path', 'url(#vp-clip)');
   extrudeG = zoomG.append('g').attr('class', 'extrude');
   areaG = zoomG.append('g').attr('class', 'areas');
 
@@ -71,6 +64,9 @@ export function initMap(svgEl, h) {
 
 function buildDefs() {
   const defs = svg.append('defs');
+  // viewport clip rect (sized in applyViewport)
+  defs.append('clipPath').attr('id', 'vp-clip').append('rect').attr('id', 'vp-rect').attr('x', -40).attr('y', -40).attr('width', W + 80).attr('height', H + 80);
+
   const glow = defs.append('filter').attr('id', 'st-glow').attr('x', '-150%').attr('y', '-150%').attr('width', '400%').attr('height', '400%');
   glow.append('feGaussianBlur').attr('stdDeviation', 3.4).attr('result', 'b');
   const m = glow.append('feMerge');
@@ -78,8 +74,8 @@ function buildDefs() {
   m.append('feMergeNode').attr('in', 'SourceGraphic');
 
   const grad = defs.append('linearGradient').attr('id', 'tileGrad').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 1);
-  grad.append('stop').attr('offset', '0%').attr('stop-color', '#E4D7CC');
-  grad.append('stop').attr('offset', '100%').attr('stop-color', '#CBB9AC');
+  grad.append('stop').attr('offset', '0%').attr('stop-color', '#dccdc1');
+  grad.append('stop').attr('offset', '100%').attr('stop-color', '#cdbcb0');
 }
 
 // ---------------------------------------------------------------------------
@@ -178,15 +174,19 @@ export function settlePlinth() {
 function drawExtrude(feat) {
   extrudeG.selectAll('*').remove();
   if (!feat) return;
-  const d = path()(feat);
+  // Use only the largest landmass so far islands don't add huge off-screen
+  // coordinates; draw a few solid, opaque offset copies (no 16-layer stack, no
+  // opacity fade) so there is no banding/flicker on high-DPR mobile screens.
+  const d = path()(largestPart(feat));
   if (!d) return;
-  const stepDy = DEPTH_PX / transform.k / DEPTH_STEPS;
-  const stepDx = stepDy * 0.4;
+  const depth = DEPTH_PX / transform.k;
+  const dx = depth * 0.4;
+  const N = 3;
   const g = extrudeG.append('g');
-  for (let i = DEPTH_STEPS; i >= 1; i--) {
-    g.append('path').attr('d', d).attr('class', 'extrude-wall').attr('transform', `translate(${stepDx * i} ${stepDy * i})`);
+  for (let i = N; i >= 1; i--) {
+    const t = (i / N) * depth;
+    g.append('path').attr('d', d).attr('class', 'extrude-wall').attr('transform', `translate(${(dx * i) / N} ${t})`);
   }
-  gsap.fromTo(extrudeG.node(), { opacity: 0 }, { opacity: 1, duration: 0.45, ease: 'power2.out' });
 }
 
 // ---------------------------------------------------------------------------

@@ -138,6 +138,25 @@ export async function loadTown(code) {
 // Framing — ignores tiny distant islands so a prefecture/city frames tightly
 // on its mainland body (e.g. excludes Kanagawa's southern islands).
 // ---------------------------------------------------------------------------
+// Feature containing only the largest polygon of a (possibly multi-island)
+// feature — used for the plinth so far-flung islands (e.g. Tokyo's Izu/Ogasawara)
+// don't inject huge off-screen coordinates that flicker on mobile GPUs.
+export function largestPart(feat) {
+  const polys = polygonsOf(feat.geometry);
+  if (polys.length <= 1) return feat;
+  let best = null;
+  let bestArea = -1;
+  for (const poly of polys) {
+    const b = _path.bounds({ type: 'Feature', geometry: { type: 'Polygon', coordinates: poly } });
+    const area = (b[1][0] - b[0][0]) * (b[1][1] - b[0][1]);
+    if (area > bestArea) {
+      bestArea = area;
+      best = poly;
+    }
+  }
+  return { type: 'Feature', properties: feat.properties, geometry: { type: 'Polygon', coordinates: best } };
+}
+
 function polygonsOf(geometry) {
   if (!geometry) return [];
   if (geometry.type === 'Polygon') return [geometry.coordinates];

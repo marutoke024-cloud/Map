@@ -58,12 +58,13 @@ body {
   fill: #2c5169;
   transition: fill 0.35s var(--ease), opacity 0.5s var(--ease);
 }
-/* japan / region selectable prefectures */
-.area--playable { fill: #6f8799; cursor: pointer; }
+/* japan / region selectable prefectures — brighter so the silhouette reads
+   clearly against the deep background */
+.area--playable { fill: #93acbc; cursor: pointer; }
 .area--playable:hover { fill: var(--shape); }
 .area--member { fill: var(--shape); cursor: pointer; }
 .area--member:hover { fill: var(--shape-bright); }
-.area--dim { fill: #24465d; opacity: 0.42; pointer-events: none; }
+.area--dim { fill: #4a708c; opacity: 0.78; pointer-events: none; }
 /* municipal tiles + leaf */
 .area--tile {
   fill: url(#tileGrad);
@@ -755,75 +756,54 @@ body {
 @keyframes loaderGrid {
   to { transform: translateY(-46px) translateX(-46px); }
 }
-.loader-inner {
+.loader-stage {
   position: relative;
   z-index: 2;
+  width: min(680px, 84vw);
   text-align: center;
-  width: min(440px, 78vw);
 }
-.loader-word {
-  display: flex;
-  justify-content: center;
-  gap: 0.16em;
-  font-size: clamp(34px, 7vw, 64px);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--shape);
+.lp {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
 }
-.loader-word span {
-  display: inline-block;
-  animation: wordRise 0.9s var(--ease) both;
+.lp-cliptext,
+.lp-ghost,
+.lp-stroke {
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 210px;
+  letter-spacing: 0.02em;
 }
-.loader-word span:nth-child(1) { animation-delay: 0.05s; }
-.loader-word span:nth-child(2) { animation-delay: 0.13s; }
-.loader-word span:nth-child(3) { animation-delay: 0.21s; }
-.loader-word span:nth-child(4) { animation-delay: 0.29s; }
-.loader-word span:nth-child(5) { animation-delay: 0.37s; }
-@keyframes wordRise {
-  from { opacity: 0; transform: translateY(0.5em) rotateX(40deg); filter: blur(4px); }
-  to { opacity: 1; transform: none; filter: none; }
+.lp-ghost { fill: rgba(210, 193, 182, 0.1); }
+.lp-stroke { fill: none; stroke: rgba(210, 193, 182, 0.4); stroke-width: 1.4; }
+#lp-wave {
+  animation: lpwave 2.4s linear infinite;
+  filter: drop-shadow(0 -2px 6px rgba(236, 224, 214, 0.25));
 }
-.loader-tag {
-  margin-top: 12px;
-  font-size: 10px;
-  letter-spacing: 0.55em;
-  color: var(--ink-dim);
-  animation: wordRise 1s var(--ease) 0.4s both;
+@keyframes lpwave {
+  to { transform: translateX(-150px); }
 }
-.loader-bar {
-  position: relative;
-  height: 2px;
-  margin: 34px 0 14px;
-  background: rgba(159, 182, 198, 0.18);
-  overflow: hidden;
-}
-.loader-bar i {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, var(--accent), var(--shape));
-  transform: scaleX(0);
-  transform-origin: left;
-  will-change: transform;
-}
-.loader-pct {
+.loader-meta {
+  margin-top: 18px;
   display: flex;
   align-items: baseline;
-  justify-content: flex-end;
-  gap: 2px;
-  font-weight: 600;
+  justify-content: center;
+  gap: 6px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
-.loader-pct span { font-size: 30px; letter-spacing: 0.02em; }
-.loader-pct em { font-size: 13px; font-style: normal; color: var(--ink-dim); }
-.loader-status {
-  margin-top: 6px;
-  text-align: left;
+.loader-meta span { font-size: 26px; font-weight: 700; }
+.loader-meta em { font-size: 13px; font-style: normal; color: var(--ink-dim); }
+.loader-meta i {
+  font-style: normal;
   font-size: 10px;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--ink-dim);
-  min-height: 12px;
+  margin-left: 10px;
 }
 .loader-curtain {
   position: absolute;
@@ -996,4 +976,50 @@ body {
 
 @media (max-width: 760px) {
   .searchbar { display: none; }
+}
+
+/* ---------------------------------------------------- floating sea logo */
+.sea-logo {
+  position: absolute;
+  top: 13vh;
+  left: 6vw;
+  z-index: 9;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.9s var(--ease), transform 0.9s var(--ease);
+}
+.sea-logo.show { opacity: 1; transform: translateY(0); }
+.sea-logo.show .sea-logo-mark { animation: floatlogo 7s ease-in-out infinite; }
+.sea-logo-mark {
+  font-weight: 800;
+  font-size: clamp(44px, 7vw, 120px);
+  letter-spacing: 0.06em;
+  line-height: 0.9;
+  color: var(--shape);
+  text-shadow: 0 14px 40px rgba(8, 22, 33, 0.55);
+}
+.sea-logo-sub {
+  margin-top: 8px;
+  font-size: clamp(9px, 0.9vw, 13px);
+  letter-spacing: 0.5em;
+  color: var(--ink-dim);
+}
+@keyframes floatlogo {
+  0%, 100% { transform: translateY(0) rotate(-0.6deg); }
+  50% { transform: translateY(-14px) rotate(0.6deg); }
+}
+@media (max-width: 760px) {
+  .sea-logo { top: 11vh; left: 6vw; }
+}
+
+/* --------------------------------------- mobile: keep the search box ----- */
+@media (max-width: 760px) {
+  .hud-top { flex-wrap: wrap; row-gap: 10px; }
+  .searchbar {
+    display: flex;
+    order: 5;
+    flex: 1 1 100%;
+    max-width: none;
+  }
 }

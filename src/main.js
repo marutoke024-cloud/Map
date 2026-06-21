@@ -114,11 +114,16 @@ function applyLimits(frame, { minMul = 0.75, maxMul = 6 } = {}) {
   setZoomLimits(frame.k * minMul, frame.k * maxMul);
 }
 
+function seaLogo(show) {
+  $('sea-logo').classList.toggle('show', show);
+}
+
 function goJapan(animate = true) {
   setState({ level: 'japan', regionKey: null, prefKey: null, cityKey: null, wardKey: null });
   setPinning(false);
   renderStations([]);
   startAmbient();
+  seaLogo(true);
   const areas = mainland().map((f) => ({
     id: f.properties.id,
     feature: f,
@@ -137,6 +142,7 @@ function goJapan(animate = true) {
 
 function goRegion(regionKey, animate = true) {
   stopAmbient();
+  seaLogo(false);
   const r = REGIONS[regionKey];
   setState({ level: 'region', regionKey, prefKey: null, cityKey: null, wardKey: null });
   setPinning(false);
@@ -161,6 +167,7 @@ function goRegion(regionKey, animate = true) {
 
 async function goPrefecture(prefKey, animate = true) {
   stopAmbient();
+  seaLogo(false);
   const p = PREFECTURES[prefKey];
   const regionKey = PREF_ID_TO_REGION[p.id];
   setState({ level: 'prefecture', regionKey, prefKey, cityKey: null, wardKey: null });
@@ -347,8 +354,17 @@ function handlePinClick(pin) {
 // Data refresh
 // ---------------------------------------------------------------------------
 function refreshPins() {
-  // Pins only appear once zoomed to a prefecture or deeper.
-  const visible = state.level === 'japan' || state.level === 'region' ? [] : state.pins;
+  // Only show pins that belong to the area currently on screen.
+  let visible = [];
+  if (state.level === 'ward') {
+    visible = state.pins.filter(
+      (p) => p.prefKey === state.prefKey && p.cityKey === state.cityKey && p.wardKey === state.wardKey,
+    );
+  } else if (state.level === 'city') {
+    visible = state.pins.filter((p) => p.prefKey === state.prefKey && p.cityKey === state.cityKey);
+  } else if (state.level === 'prefecture') {
+    visible = state.pins.filter((p) => p.prefKey === state.prefKey);
+  }
   renderPins(visible, { privateMode: state.privateMode, activeId: state.activePinId });
 }
 

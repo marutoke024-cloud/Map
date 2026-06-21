@@ -1,25 +1,39 @@
-// Awwwards-style intro loader: a real 0→100% counter driven by asset
-// preloading, with an eased number, a filling hairline bar, and a curtain
-// reveal that hands off to the map's fly-in.
+// Awwwards-style intro loader: the "SPOTS" wordmark fills with liquid as the
+// real asset progress climbs 0→100%. The liquid level rises (eased) and its
+// surface ripples; a curtain then reveals the map.
 import { gsap } from 'gsap';
 
 const $ = (id) => document.getElementById(id);
+const VB_H = 300; // svg viewBox height
+
+// A wavy-topped liquid body that fills downward from y≈0; we translate the whole
+// group up as the level rises. Spans well beyond the text so horizontal drift
+// never reveals an edge.
+function wavePath(amp = 13, wl = 150) {
+  let d = `M -600 0`;
+  for (let x = -600; x <= 1600; x += 15) d += ` L ${x} ${(Math.sin(x / (wl / (2 * Math.PI))) * amp).toFixed(2)}`;
+  d += ` L 1600 ${VB_H} L -600 ${VB_H} Z`;
+  return d;
+}
 
 export function createLoader() {
   const numEl = $('loader-num');
-  const fillEl = $('loader-fill');
   const statusEl = $('loader-status');
+  const liquid = $('lp-liquid');
+  const wave = $('lp-wave');
+  wave.setAttribute('d', wavePath());
+  wave.setAttribute('fill', 'url(#lp-grad)');
 
-  let target = 0; // real progress 0..1
-  let shown = 0; // displayed progress (eased)
+  let target = 0;
+  let shown = 0;
   let raf = null;
 
   const tick = () => {
-    shown += (target - shown) * 0.08;
-    if (shown > 0.999) shown = target >= 1 ? 1 : shown;
-    const pct = Math.round(shown * 100);
-    numEl.textContent = pct;
-    fillEl.style.transform = `scaleX(${shown})`;
+    shown += (target - shown) * 0.07;
+    const p = shown;
+    numEl.textContent = Math.round(p * 100);
+    // level rises: at p=0 group is pushed fully down (empty), at p=1 it sits at 0 (full)
+    liquid.setAttribute('transform', `translate(0 ${((1 - p) * (VB_H + 30)).toFixed(1)})`);
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
@@ -31,23 +45,18 @@ export function createLoader() {
     },
     async finish() {
       target = 1;
-      // wait until the eased number visually reaches ~100
       await new Promise((r) => {
-        const wait = () => (shown > 0.985 ? r() : requestAnimationFrame(wait));
+        const wait = () => (shown > 0.99 ? r() : requestAnimationFrame(wait));
         wait();
       });
       numEl.textContent = '100';
-      fillEl.style.transform = 'scaleX(1)';
       statusEl.textContent = 'welcome';
       cancelAnimationFrame(raf);
+      liquid.setAttribute('transform', 'translate(0 0)');
 
       const loader = $('loader');
-      const tl = gsap.timeline({
-        onComplete: () => {
-          loader.remove(); // fully remove so nothing from the loader can show through
-        },
-      });
-      tl.to('.loader-inner', { autoAlpha: 0, y: -24, duration: 0.6, ease: 'power2.in' })
+      const tl = gsap.timeline({ onComplete: () => loader.remove() });
+      tl.to('.loader-stage', { autoAlpha: 0, y: -26, duration: 0.6, ease: 'power2.in' })
         .to('.loader-curtain', { scaleY: 1, duration: 0.7, ease: 'power4.inOut' }, '-=0.2')
         .set(loader, { background: 'transparent' })
         .set('.loader-grid', { autoAlpha: 0 })
@@ -57,10 +66,6 @@ export function createLoader() {
   };
 }
 
-/**
- * Run a set of async asset tasks while reporting progress to the loader.
- * `tasks` is an array of { label, run: () => Promise }.
- */
 export async function preload(loader, tasks) {
   let done = 0;
   const total = tasks.length;

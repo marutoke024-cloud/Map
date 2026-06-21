@@ -60,10 +60,28 @@ export function openPanel(pin, isNew) {
         <input class="input" id="f-budget" value="${esc(draft.budget || '')}" placeholder="¥2,000" />
       </div>
       <div>
-        <label class="field-label">Address 住所</label>
-        <input class="input" id="f-address" value="${esc(draft.address || '')}" placeholder="住所" />
+        <label class="field-label">Nearest station 最寄り駅</label>
+        <input class="input" id="f-station" value="${esc(draft.station || '')}" placeholder="◯◯駅" />
       </div>
     </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Private room 個室</label>
+        <select class="input" id="f-private">
+          <option value=""${!draft.privateRoom ? ' selected' : ''}>—</option>
+          <option value="あり"${draft.privateRoom === 'あり' ? ' selected' : ''}>あり</option>
+          <option value="なし"${draft.privateRoom === 'なし' ? ' selected' : ''}>なし</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Seats 席数</label>
+        <input class="input" id="f-capacity" value="${esc(draft.capacity || '')}" placeholder="40" inputmode="numeric" />
+      </div>
+    </div>
+
+    <label class="field-label">Address 住所</label>
+    <input class="input" id="f-address" value="${esc(draft.address || '')}" placeholder="住所" />
 
     <label class="field-label">Memo</label>
     <textarea class="input textarea" id="f-memo" placeholder="メモ・感想">${esc(draft.memo || '')}</textarea>
@@ -162,6 +180,9 @@ export function openPanel(pin, isNew) {
     state.name = shop.name;
     state.address = shop.address;
     state.budget = shop.budget;
+    state.station = shop.station || state.station;
+    state.privateRoom = shop.privateRoom || state.privateRoom;
+    state.capacity = shop.capacity || state.capacity;
     state.hotpepperId = shop.id;
     state.hotpepperUrl = shop.url;
     if (shop.category && !CATEGORIES.includes(state.category)) state.category = 'Restaurant';
@@ -172,12 +193,18 @@ export function openPanel(pin, isNew) {
     $('#f-name').value = shop.name || '';
     $('#f-address').value = shop.address || '';
     $('#f-budget').value = shop.budget || '';
+    if ($('#f-station')) $('#f-station').value = state.station || '';
+    if ($('#f-private')) $('#f-private').value = state.privateRoom || '';
+    if ($('#f-capacity')) $('#f-capacity').value = state.capacity || '';
   }
 
   $('#f-save').onclick = async () => {
     state.name = $('#f-name').value.trim() || 'Untitled';
     state.budget = $('#f-budget').value.trim();
     state.address = $('#f-address').value.trim();
+    state.station = $('#f-station').value.trim();
+    state.privateRoom = $('#f-private').value;
+    state.capacity = $('#f-capacity').value.trim();
     state.memo = $('#f-memo').value.trim();
     $('#f-save').disabled = true;
     $('#f-save').textContent = 'Saving…';
@@ -193,6 +220,9 @@ export function openPanel(pin, isNew) {
         category: state.category,
         memo: state.memo,
         budget: state.budget,
+        station: state.station || '',
+        privateRoom: state.privateRoom || '',
+        capacity: state.capacity || '',
         address: state.address,
         photo: state.photo || null,
         hotpepperId: state.hotpepperId || null,
@@ -205,6 +235,9 @@ export function openPanel(pin, isNew) {
         category: state.category,
         memo: state.memo,
         budget: state.budget,
+        station: state.station || '',
+        privateRoom: state.privateRoom || '',
+        capacity: state.capacity || '',
         address: state.address,
         photo: state.photo || null,
         hotpepperId: state.hotpepperId || null,

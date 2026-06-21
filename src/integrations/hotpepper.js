@@ -42,6 +42,9 @@ function normalize(shop) {
     category: shop.genre?.name || '',
     url: shop.urls?.pc || '',
     photo: shop.photo?.pc?.l || shop.photo?.mobile?.l || '',
+    station: shop.station_name || '',
+    privateRoom: shop.private_room || '',
+    capacity: shop.capacity || '',
     lat: shop.lat,
     lng: shop.lng,
   };

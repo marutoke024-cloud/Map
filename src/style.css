@@ -1076,3 +1076,12 @@ body {
 }
 .hp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hp-thumb.on { border-color: var(--shape); }
+
+/* reservation / page URL row */
+.url-row { display: flex; gap: 8px; align-items: stretch; }
+.url-row .input { flex: 1; min-width: 0; }
+.url-open {
+  display: flex; align-items: center; white-space: nowrap;
+  text-decoration: none; padding: 11px 16px;
+}
+.btn.disabled, .url-open.disabled { opacity: 0.45; pointer-events: none; }

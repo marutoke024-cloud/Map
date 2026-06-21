@@ -85,6 +85,12 @@ export function openPanel(pin, isNew) {
     <label class="field-label">Address 住所</label>
     <input class="input" id="f-address" value="${esc(draft.address || '')}" placeholder="住所" />
 
+    <label class="field-label">Reservation / page URL 予約・店舗ページ</label>
+    <div class="url-row">
+      <input class="input" id="f-url" value="${esc(draft.hotpepperUrl || '')}" placeholder="https://…（予約ページ）" />
+      <a class="btn btn-primary url-open" id="f-url-open" target="_blank" rel="noopener">予約する ↗</a>
+    </div>
+
     <label class="field-label">Memo</label>
     <textarea class="input textarea" id="f-memo" placeholder="メモ・感想">${esc(draft.memo || '')}</textarea>
 
@@ -136,6 +142,22 @@ export function openPanel(pin, isNew) {
     };
     r.readAsDataURL(file);
   };
+
+  // Reservation / page URL → keep the "予約する" button in sync
+  const urlInput = $('#f-url');
+  const urlOpen = $('#f-url-open');
+  const syncUrl = () => {
+    const v = urlInput.value.trim();
+    if (v) {
+      urlOpen.href = /^https?:/i.test(v) ? v : 'https://' + v;
+      urlOpen.classList.remove('disabled');
+    } else {
+      urlOpen.removeAttribute('href');
+      urlOpen.classList.add('disabled');
+    }
+  };
+  urlInput.addEventListener('input', syncUrl);
+  syncUrl();
 
   // HotPepper fetch
   $('#hp-go').onclick = async () => {
@@ -249,6 +271,10 @@ export function openPanel(pin, isNew) {
     $('#f-name').value = shop.name || '';
     $('#f-address').value = shop.address || '';
     $('#f-budget').value = shop.budget || '';
+    if ($('#f-url')) {
+      $('#f-url').value = shop.url || '';
+      syncUrl();
+    }
     if ($('#f-station')) $('#f-station').value = state.station || '';
     if ($('#f-private')) $('#f-private').value = state.privateRoom || '';
     if ($('#f-capacity')) $('#f-capacity').value = state.capacity || '';
@@ -261,6 +287,7 @@ export function openPanel(pin, isNew) {
     state.station = $('#f-station').value.trim();
     state.privateRoom = $('#f-private').value;
     state.capacity = $('#f-capacity').value.trim();
+    state.hotpepperUrl = $('#f-url').value.trim() || null;
     state.memo = $('#f-memo').value.trim();
     $('#f-save').disabled = true;
     $('#f-save').textContent = 'Saving…';

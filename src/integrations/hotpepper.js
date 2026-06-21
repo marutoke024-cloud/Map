@@ -47,10 +47,72 @@ function normalize(shop) {
     charter: shop.charter || '',
     nonSmoking: shop.non_smoking || '',
     capacity: shop.capacity || '',
-    partyCapacity: shop.party_capacity || '',
     lat: shop.lat,
     lng: shop.lng,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Best-effort scrape of the shop's web page for the per-seat list (お席) and
+// interior photos — these are NOT exposed by the official API, only on the page.
+// Fetched through the same CORS proxy. May break if HotPepper changes its HTML.
+// ---------------------------------------------------------------------------
+const SEAT_TYPES = ['テーブル', 'カウンター', '個室', '半個室', '掘りごたつ', '座敷', 'ソファー', 'ソファ', 'テラス', '立ち飲み', '貸切'];
+
+export async function scrapeShopPage(url) {
+  if (!url) return { photos: [], seats: '' };
+  let html;
+  try {
+    const target = url.startsWith('http') ? url : `https://www.hotpepper.jp/${url}/`;
+    const res = await fetch(settings.proxy + encodeURIComponent(target));
+    if (!res.ok) return { photos: [], seats: '' };
+    html = await res.text();
+  } catch {
+    return { photos: [], seats: '' };
+  }
+
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(html, 'text/html');
+  } catch {
+    return { photos: [], seats: '' };
+  }
+
+  // photos: gallery images on hotpepper's image CDN (skip tiny/chrome images)
+  const photos = [];
+  const seen = new Set();
+  for (const img of doc.querySelectorAll('img')) {
+    let src = img.getAttribute('src') || img.getAttribute('data-src') || '';
+    if (!/imgfp\.hotp\.jp|imgcp\.hotp\.jp/.test(src)) continue;
+    if (/_60\.|_120\.|icon|logo|noimage/i.test(src)) continue;
+    if (src.startsWith('//')) src = 'https:' + src;
+    if (seen.has(src)) continue;
+    seen.add(src);
+    photos.push(src);
+    if (photos.length >= 12) break;
+  }
+
+  // seats: find the お席 section and pull "<type> 〇名様" entries
+  let seatNode = null;
+  for (const h of doc.querySelectorAll('h1,h2,h3,h4,th,dt,.ttl')) {
+    if (/お席|席数|seats/i.test(h.textContent || '')) {
+      seatNode = h.closest('section,div,table,dl') || h.parentElement;
+      break;
+    }
+  }
+  const text = ((seatNode || doc.body).textContent || '').replace(/\s+/g, ' ');
+  const re = new RegExp(`(${SEAT_TYPES.join('|')})[^0-9]{0,24}?(\\d{1,4})\\s*名`, 'g');
+  const found = [];
+  const dedup = new Set();
+  let m;
+  while ((m = re.exec(text)) && found.length < 12) {
+    const key = `${m[1]}:${m[2]}`;
+    if (dedup.has(key)) continue;
+    dedup.add(key);
+    found.push(`${m[1]}${m[2]}名`);
+  }
+
+  return { photos, seats: found.join(' / ') };
 }
 
 async function call(params) {

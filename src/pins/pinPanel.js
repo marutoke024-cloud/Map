@@ -1,7 +1,7 @@
 // The slide-in detail panel used to create and edit a pin.
 
 import { addPin, updatePin, deletePin } from './pinStore.js';
-import { resolveByUrl, searchByKeyword } from '../integrations/hotpepper.js';
+import { resolveByUrl, searchByKeyword, scrapeShopPage } from '../integrations/hotpepper.js';
 import { PREFECTURES } from '../config.js';
 
 const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
@@ -45,6 +45,7 @@ export function openPanel(pin, isNew) {
       </div>
       <div class="hp-status" id="hp-status"></div>
       <div class="hp-results" id="hp-results"></div>
+      <div class="hp-gallery" id="hp-gallery"></div>
     </div>
 
     <label class="field-label">Name 店名</label>
@@ -151,6 +152,7 @@ export function openPanel(pin, isNew) {
         applyShop(shop);
         status.textContent = `Loaded: ${shop.name}`;
         status.className = 'hp-status ok';
+        enrichFromPage(shop.url || q, status);
       } else {
         const shops = await searchByKeyword(q);
         status.textContent = shops.length ? `${shops.length} results — pick one` : 'No results';
@@ -165,9 +167,11 @@ export function openPanel(pin, isNew) {
           .join('');
         results.querySelectorAll('.hp-card').forEach((c) =>
           c.addEventListener('click', () => {
-            applyShop(shops[+c.dataset.i]);
-            status.textContent = `Loaded: ${shops[+c.dataset.i].name}`;
+            const shop = shops[+c.dataset.i];
+            applyShop(shop);
+            status.textContent = `Loaded: ${shop.name}`;
             results.innerHTML = '';
+            enrichFromPage(shop.url, status);
           }),
         );
       }
@@ -176,6 +180,37 @@ export function openPanel(pin, isNew) {
       status.className = 'hp-status err';
     }
   };
+
+  function appendMemo(line) {
+    state.memo = state.memo ? `${state.memo}\n${line}` : line;
+    if ($('#f-memo')) $('#f-memo').value = state.memo;
+  }
+
+  // Pull the per-seat list (お席) + interior photos from the shop web page
+  // (not available via the official API) and let the user pick a photo.
+  async function enrichFromPage(url, status) {
+    if (!url) return;
+    const gal = $('#hp-gallery');
+    if (gal) gal.innerHTML = '<span class="hp-galmsg">店内写真・席情報を取得中…</span>';
+    const { photos, seats } = await scrapeShopPage(url);
+    if (seats) appendMemo(`【お席】 ${seats}`);
+    if (gal) {
+      if (photos.length) {
+        gal.innerHTML =
+          '<span class="hp-galmsg">店内写真を選択（雰囲気重視）</span>' +
+          photos.map((src) => `<button class="hp-thumb" data-src="${esc(src)}"><img src="${esc(src)}" loading="lazy" /></button>`).join('');
+        gal.querySelectorAll('.hp-thumb').forEach((b) =>
+          b.addEventListener('click', () => {
+            state.photo = b.dataset.src;
+            $('#photo-preview').innerHTML = `<img src="${esc(state.photo)}" />`;
+            gal.querySelectorAll('.hp-thumb').forEach((x) => x.classList.toggle('on', x === b));
+          }),
+        );
+      } else {
+        gal.innerHTML = '<span class="hp-galmsg">店内写真は取得できませんでした（ページ非対応の可能性）</span>';
+      }
+    }
+  }
 
   function applyShop(shop) {
     state.name = shop.name;
@@ -209,13 +244,7 @@ export function openPanel(pin, isNew) {
     if (shop.privateRoom) info.push(`個室:${shop.privateRoom}`);
     if (shop.charter) info.push(`貸切:${shop.charter}`);
     if (shop.nonSmoking) info.push(`喫煙:${shop.nonSmoking}`);
-    if (shop.partyCapacity) info.push(`宴会最大:${shop.partyCapacity}名`);
-    if (shop.capacity) info.push(`総席数:${shop.capacity}`);
-    if (info.length) {
-      const block = '【ホットペッパー情報】 ' + info.join(' / ');
-      state.memo = state.memo ? `${state.memo}\n${block}` : block;
-      if ($('#f-memo')) $('#f-memo').value = state.memo;
-    }
+    if (info.length) appendMemo('【ホットペッパー】 ' + info.join(' / '));
 
     $('#f-name').value = shop.name || '';
     $('#f-address').value = shop.address || '';

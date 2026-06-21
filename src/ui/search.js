@@ -94,6 +94,7 @@ function bindRows() {
 }
 
 function run() {
+  positionResults();
   const q = inputEl.value.trim();
   clearEl.hidden = !q;
   const pins = getPins().filter((p) => privateRef() || !p.locked);
@@ -124,6 +125,7 @@ function run() {
 }
 
 async function runAI() {
+  positionResults();
   const q = inputEl.value.trim();
   const pins = getPins().filter((p) => privateRef() || !p.locked);
   resultsEl.innerHTML = '<div class="sr-hint sr-loading">✦ Gemini が選定中…</div>';
@@ -143,4 +145,17 @@ async function runAI() {
 
 function hide() {
   resultsEl.hidden = true;
+}
+
+// Anchor the dropdown directly under the search box (it wraps to its own row on
+// mobile, so a fixed top would overlap the input and hide typed text).
+function positionResults() {
+  const bar = inputEl.closest('.searchbar');
+  if (!bar) return;
+  const r = bar.getBoundingClientRect();
+  resultsEl.style.top = `${Math.round(r.bottom + 6)}px`;
+  resultsEl.style.left = `${Math.round(r.left)}px`;
+  resultsEl.style.width = `${Math.round(r.width)}px`;
+  resultsEl.style.transform = 'none';
+  resultsEl.style.right = 'auto';
 }

@@ -28,6 +28,7 @@ import {
   stopAmbient,
   settlePlinth,
   applyViewport,
+  screenToGeo,
 } from './map/mapRenderer.js';
 import { state, setState } from './state.js';
 import { REGIONS, PREFECTURES, PREF_KEY_BY_ID, PREF_ID_TO_REGION } from './config.js';
@@ -80,6 +81,7 @@ const $ = (id) => document.getElementById(id);
     onSaved: handlePinSaved,
     onDeleted: handlePinDeleted,
     onClose: () => setState({ activePinId: null }),
+    locate: locateByCoord,
   });
   initSettings($('settings'));
 
@@ -350,6 +352,54 @@ function handlePinClick(pin) {
   openPanel(pin, false);
 }
 
+// Resolve which prefecture / city / ward a lon-lat falls in (supported areas).
+function locateByCoord(lon, lat) {
+  for (const key of Object.keys(PREFECTURES)) {
+    const f = featureById(PREFECTURES[key].id);
+    if (f && geoContains(f, [lon, lat])) {
+      const muni = getMunicipality(key);
+      let cityKey = null;
+      let wardKey = null;
+      if (muni) {
+        for (const c of muni.cities) {
+          if (geoContains(c.feature, [lon, lat])) {
+            cityKey = c.key;
+            if (c.designated && c.wardUnits) {
+              for (const w of c.wardUnits) {
+                if (geoContains(w.feature, [lon, lat])) {
+                  wardKey = w.key;
+                  break;
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+      return { prefKey: key, cityKey, wardKey };
+    }
+  }
+  return { prefKey: null, cityKey: null, wardKey: null };
+}
+
+// "+" add: open a new spot. Default position = current view centre (refined to
+// the shop's real coordinates when a HotPepper shop is loaded).
+function openAddPin() {
+  hideStationPopup();
+  const [lon, lat] = screenToGeo(window.innerWidth / 2, window.innerHeight / 2);
+  const loc = locateByCoord(lon, lat);
+  openPanel(
+    {
+      prefKey: loc.prefKey || state.prefKey,
+      cityKey: loc.cityKey ?? state.cityKey,
+      wardKey: loc.wardKey ?? state.wardKey,
+      lon,
+      lat,
+    },
+    true,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Data refresh
 // ---------------------------------------------------------------------------
@@ -372,7 +422,10 @@ function handlePinSaved(pin, isNew) {
   if (isNew) state.pins = [...state.pins, pin];
   else state.pins = state.pins.map((p) => (p.id === pin.id ? pin : p));
   setState({ activePinId: null });
-  refreshPins();
+  // Make sure the new pin is visible: jump to its prefecture if we're not
+  // already showing that area.
+  if (isNew && pin.prefKey && pin.prefKey !== state.prefKey) goPrefecture(pin.prefKey);
+  else refreshPins();
 }
 
 function handlePinDeleted(id) {
@@ -478,6 +531,7 @@ function wireControls() {
     });
   };
 
+  $('btn-add').onclick = openAddPin;
   $('btn-settings').onclick = openSettings;
   $('btn-locate').onclick = toggleLocate;
 

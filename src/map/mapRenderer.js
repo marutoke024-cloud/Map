@@ -14,6 +14,7 @@ let renderedStations = [];
 let renderedPins = [];
 let renderedAreas = [];
 let baseFeat = null;
+let animating = false;
 let currentLoc = null; // {lon,lat}
 let ambientRAF = null;
 let ambientParticles = [];
@@ -114,6 +115,7 @@ function applyTransform() {
 }
 export function flyTo(target, { duration = 1.5, onComplete } = {}) {
   gsap.killTweensOf(transform);
+  animating = duration > 0.05;
   gsap.to(transform, {
     k: target.k,
     x: target.x,
@@ -122,6 +124,7 @@ export function flyTo(target, { duration = 1.5, onComplete } = {}) {
     ease: 'power3.inOut',
     onUpdate: applyTransform,
     onComplete: () => {
+      animating = false;
       applyTransform();
       settlePlinth(); // draw the plinth only once the camera has settled
       onComplete?.();
@@ -300,15 +303,26 @@ export function setCurrentLocation(lonlat) {
 // Per-frame overlay positioning + label collision
 // ---------------------------------------------------------------------------
 function reposition() {
-  placeAreaLabels();
-
-  const stPos = new Map();
-  stationsG.selectAll('g.station').attr('transform', (d) => {
-    const [x, y] = geoToScreen(d.lon, d.lat);
-    stPos.set(d.id, [x, y]);
-    return `translate(${x} ${y})`;
-  });
-  placeStationLabels(stPos);
+  // During the fly animation, skip the expensive label collision + station
+  // re-placement (hide them); run the full pass once the camera settles. This
+  // keeps zoom transitions smooth on mobile.
+  if (animating) {
+    labelsG.attr('display', 'none');
+    stLabelsG.attr('display', 'none');
+    stationsG.attr('display', 'none');
+  } else {
+    labelsG.attr('display', null);
+    stLabelsG.attr('display', null);
+    stationsG.attr('display', null);
+    placeAreaLabels();
+    const stPos = new Map();
+    stationsG.selectAll('g.station').attr('transform', (d) => {
+      const [x, y] = geoToScreen(d.lon, d.lat);
+      stPos.set(d.id, [x, y]);
+      return `translate(${x} ${y})`;
+    });
+    placeStationLabels(stPos);
+  }
 
   pinsG.selectAll('g.pin:not(.pin--ghost)').attr('transform', (d) => {
     const [x, y] = geoToScreen(d.lon, d.lat);

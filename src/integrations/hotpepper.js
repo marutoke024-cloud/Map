@@ -44,7 +44,10 @@ function normalize(shop) {
     photo: shop.photo?.pc?.l || shop.photo?.mobile?.l || '',
     station: shop.station_name || '',
     privateRoom: shop.private_room || '',
+    charter: shop.charter || '',
+    nonSmoking: shop.non_smoking || '',
     capacity: shop.capacity || '',
+    partyCapacity: shop.party_capacity || '',
     lat: shop.lat,
     lng: shop.lng,
   };

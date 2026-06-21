@@ -112,6 +112,8 @@ body {
   opacity: 0.22;
   filter: url(#st-glow);
   animation: stpulse 3s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 .station-core {
   fill: #ffffff;
@@ -158,6 +160,7 @@ body {
   fill: #5ec8ff;
   opacity: 0.4;
   animation: locpulse 1.8s ease-out infinite;
+  transform-box: fill-box;
   transform-origin: center;
 }
 @keyframes locpulse {
@@ -176,6 +179,8 @@ body {
   fill: #ff5a36;
   opacity: 0.16;
   animation: pulse 2.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 .pin-body {
   fill: #f4502e;
@@ -1033,3 +1038,31 @@ body {
   color: var(--shape-bright);
   line-height: 1.6;
 }
+
+/* HUD icon SVGs (GPS crosshair / settings gear) — clearly distinct shapes */
+.icon-svg {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+/* add (+) button */
+.icon-btn--add { color: var(--bg-deep); background: var(--shape); border-color: var(--shape); }
+.icon-btn--add:hover { background: var(--shape-bright); color: var(--bg-deep); }
+.icon-plus {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  display: inline-block;
+}
+.icon-plus::before, .icon-plus::after {
+  content: '';
+  position: absolute;
+  background: currentColor;
+  border-radius: 2px;
+}
+.icon-plus::before { left: 5.5px; top: 0; width: 2px; height: 13px; }
+.icon-plus::after { top: 5.5px; left: 0; height: 2px; width: 13px; }

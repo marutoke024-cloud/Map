@@ -7,13 +7,14 @@ import { PREFECTURES } from '../config.js';
 const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
 
 let el;
-let onSavedCb, onDeletedCb, onCloseCb;
+let onSavedCb, onDeletedCb, onCloseCb, locateCb;
 
-export function initPanel(panelEl, { onSaved, onDeleted, onClose }) {
+export function initPanel(panelEl, { onSaved, onDeleted, onClose, locate }) {
   el = panelEl;
   onSavedCb = onSaved;
   onDeletedCb = onDeleted;
   onCloseCb = onClose;
+  locateCb = locate;
 }
 
 function esc(s = '') {
@@ -190,6 +191,32 @@ export function openPanel(pin, isNew) {
       state.photo = shop.photo;
       $('#photo-preview').innerHTML = `<img src="${esc(shop.photo)}" />`;
     }
+
+    // Place the pin at the shop's real coordinates and resolve which area it sits in
+    if (shop.lat && shop.lng) {
+      state.lat = +shop.lat;
+      state.lon = +shop.lng;
+      const loc = locateCb?.(state.lon, state.lat);
+      if (loc && loc.prefKey) {
+        state.prefKey = loc.prefKey;
+        state.cityKey = loc.cityKey;
+        state.wardKey = loc.wardKey;
+      }
+    }
+
+    // Critical reservation info (個室 / 半個室・貸切 / 喫煙) into the memo
+    const info = [];
+    if (shop.privateRoom) info.push(`個室:${shop.privateRoom}`);
+    if (shop.charter) info.push(`貸切:${shop.charter}`);
+    if (shop.nonSmoking) info.push(`喫煙:${shop.nonSmoking}`);
+    if (shop.partyCapacity) info.push(`宴会最大:${shop.partyCapacity}名`);
+    if (shop.capacity) info.push(`総席数:${shop.capacity}`);
+    if (info.length) {
+      const block = '【ホットペッパー情報】 ' + info.join(' / ');
+      state.memo = state.memo ? `${state.memo}\n${block}` : block;
+      if ($('#f-memo')) $('#f-memo').value = state.memo;
+    }
+
     $('#f-name').value = shop.name || '';
     $('#f-address').value = shop.address || '';
     $('#f-budget').value = shop.budget || '';

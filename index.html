@@ -44,6 +44,10 @@
         </div>
 
         <div class="hud-controls">
+          <button class="icon-btn icon-btn--add" id="btn-add" title="Add a spot">
+            <span class="icon-plus"></span>
+            <span class="icon-label">ADD</span>
+          </button>
           <button class="icon-btn" id="btn-private" title="Toggle private mode" aria-pressed="false">
             <span class="icon-lock"></span>
             <span class="icon-label">PRIVATE</span>
@@ -53,11 +57,18 @@
             <span class="icon-label">STATIONS</span>
           </button>
           <button class="icon-btn" id="btn-locate" title="Show my location">
-            <span class="icon-gps"></span>
+            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.4" />
+              <circle cx="12" cy="12" r="7.5" fill="none" />
+              <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" />
+            </svg>
             <span class="icon-label">GPS</span>
           </button>
           <button class="icon-btn" id="btn-settings" title="Settings">
-            <span class="icon-gear"></span>
+            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7" />
+            </svg>
             <span class="icon-label">SETTINGS</span>
           </button>
         </div>

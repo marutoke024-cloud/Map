@@ -18,7 +18,7 @@ export const settings = {
     localStorage.setItem('spots.hotpepper.key', v || '');
   },
   get proxy() {
-    return localStorage.getItem('spots.hotpepper.proxy') || 'https://corsproxy.io/?url=';
+    return localStorage.getItem('spots.hotpepper.proxy') || 'https://api.allorigins.win/raw?url=';
   },
   set proxy(v) {
     localStorage.setItem('spots.hotpepper.proxy', v || '');
@@ -61,15 +61,22 @@ const SEAT_TYPES = ['テーブル', 'カウンター', '個室', '半個室', '�
 
 export async function scrapeShopPage(url) {
   if (!url) return { photos: [], seats: '' };
-  let html;
-  try {
-    const target = url.startsWith('http') ? url : `https://www.hotpepper.jp/${url}/`;
-    const res = await fetch(settings.proxy + encodeURIComponent(target));
-    if (!res.ok) return { photos: [], seats: '' };
-    html = await res.text();
-  } catch {
-    return { photos: [], seats: '' };
+  const target = url.startsWith('http') ? url : `https://www.hotpepper.jp/${url}/`;
+  let html = '';
+  for (const px of proxyList()) {
+    try {
+      const res = await fetch(px + encodeURIComponent(target));
+      if (!res.ok) continue;
+      const t = await res.text();
+      if (t && /<html/i.test(t)) {
+        html = t;
+        break;
+      }
+    } catch {
+      /* try next proxy */
+    }
   }
+  if (!html) return { photos: [], seats: '' };
 
   let doc;
   try {
@@ -115,23 +122,57 @@ export async function scrapeShopPage(url) {
   return { photos, seats: found.join(' / ') };
 }
 
+// Public CORS proxies tried (in order) for the keyless... no — for the
+// API-key path on static hosting. corsproxy.io dropped anonymous use, so we try
+// a few and use whichever returns a valid Recruit response.
+const PUBLIC_PROXIES = ['https://api.allorigins.win/raw?url=', 'https://corsproxy.io/?url='];
+
+function proxyList() {
+  const arr = [];
+  if (settings.proxy) arr.push(settings.proxy);
+  arr.push(...PUBLIC_PROXIES);
+  return [...new Set(arr.filter(Boolean))];
+}
+
 async function call(params) {
-  let res;
-  if (settings.key) {
-    const qs = new URLSearchParams({ ...params, key: settings.key, format: 'json' }).toString();
-    const target = `${RECRUIT}?${qs}`;
-    const url = settings.proxy + encodeURIComponent(target);
-    res = await fetch(url);
-  } else {
+  // Dev server proxy (key injected server-side)
+  if (!settings.key) {
     const qs = new URLSearchParams(params).toString();
-    res = await fetch(`${DEV_PROXY}?${qs}`);
+    const res = await fetch(`${DEV_PROXY}?${qs}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HotPepper API error (${res.status}). Set an API key in Settings.`);
+    }
+    const data = await res.json();
+    return data.results?.shop || [];
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HotPepper API error (${res.status}). Set an API key in Settings.`);
+
+  // Static hosting: call Recruit through a CORS proxy, trying several.
+  const qs = new URLSearchParams({ ...params, key: settings.key, format: 'json' }).toString();
+  const target = `${RECRUIT}?${qs}`;
+  let lastErr = '';
+  for (const px of proxyList()) {
+    try {
+      const res = await fetch(px + encodeURIComponent(target));
+      if (!res.ok) {
+        lastErr = `HTTP ${res.status} (${px})`;
+        continue;
+      }
+      const data = await res.json().catch(() => null);
+      if (data && data.results) {
+        if (data.results.error) {
+          const e = data.results.error;
+          throw new Error('APIエラー: ' + (Array.isArray(e) ? e[0]?.message : JSON.stringify(e)) + '（APIキーをご確認ください）');
+        }
+        if (data.results.shop !== undefined) return data.results.shop;
+      }
+      lastErr = `proxy returned a non-API response (${px})`;
+    } catch (e) {
+      if (/APIエラー/.test(e.message)) throw e;
+      lastErr = `${e.message} (${px})`;
+    }
   }
-  const data = await res.json();
-  return data.results?.shop || [];
+  throw new Error('HotPepper取得に失敗。CORSプロキシが応答しません。SETTINGSのCORS Proxyを変更してください。[' + lastErr + ']');
 }
 
 export async function resolveByUrl(url) {

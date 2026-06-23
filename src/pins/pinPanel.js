@@ -2,6 +2,7 @@
 
 import { addPin, updatePin, deletePin } from './pinStore.js';
 import { resolveByUrl, searchByKeyword, scrapeShopPage } from '../integrations/hotpepper.js';
+import { resolveByUrl as tabelogResolve } from '../integrations/tabelog.js';
 import { PREFECTURES } from '../config.js';
 
 const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
@@ -37,15 +38,26 @@ export function openPanel(pin, isNew) {
     <button class="panel-close" aria-label="Close">×</button>
     <div class="panel-eyebrow">${isNew ? 'NEW SPOT' : 'EDIT SPOT'} · <span>${esc(prefName)}</span></div>
 
-    <div class="hp-block">
-      <label class="field-label">HotPepper Gourmet</label>
-      <div class="hp-row">
-        <input class="input" id="hp-url" placeholder="Paste shop URL or keyword…" />
-        <button class="btn btn-ghost" id="hp-go">Fetch</button>
+    <div class="src-grid">
+      <div class="hp-block">
+        <label class="field-label">HotPepper Gourmet</label>
+        <div class="hp-row">
+          <input class="input" id="hp-url" placeholder="URL / キーワード" />
+          <button class="btn btn-ghost" id="hp-go">Fetch</button>
+        </div>
+        <div class="hp-status" id="hp-status"></div>
+        <div class="hp-results" id="hp-results"></div>
+        <div class="hp-gallery" id="hp-gallery"></div>
       </div>
-      <div class="hp-status" id="hp-status"></div>
-      <div class="hp-results" id="hp-results"></div>
-      <div class="hp-gallery" id="hp-gallery"></div>
+      <div class="hp-block">
+        <label class="field-label">食べログ <span class="muted">(URL貼付)</span></label>
+        <div class="hp-row">
+          <input class="input" id="tb-url" placeholder="食べログの店舗URL" />
+          <button class="btn btn-ghost" id="tb-go">Fetch</button>
+        </div>
+        <div class="hp-status" id="tb-status"></div>
+        <div class="hp-gallery" id="tb-gallery"></div>
+      </div>
     </div>
 
     <label class="field-label">Name 店名</label>
@@ -208,31 +220,56 @@ export function openPanel(pin, isNew) {
     if ($('#f-memo')) $('#f-memo').value = state.memo;
   }
 
-  // Pull the per-seat list (お席) + interior photos from the shop web page
-  // (not available via the official API) and let the user pick a photo.
-  async function enrichFromPage(url, status) {
+  // Render an interior-photo gallery into `gal`; clicking a thumb sets the photo.
+  function renderGallery(gal, photos) {
+    if (!gal) return;
+    if (!photos.length) {
+      gal.innerHTML = '<span class="hp-galmsg">店内写真は取得できませんでした</span>';
+      return;
+    }
+    gal.innerHTML =
+      '<span class="hp-galmsg">店内写真を選択（雰囲気重視）</span>' +
+      photos.map((src) => `<button class="hp-thumb" data-src="${esc(src)}"><img src="${esc(src)}" loading="lazy" /></button>`).join('');
+    gal.querySelectorAll('.hp-thumb').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.photo = b.dataset.src;
+        $('#photo-preview').innerHTML = `<img src="${esc(state.photo)}" />`;
+        gal.querySelectorAll('.hp-thumb').forEach((x) => x.classList.toggle('on', x === b));
+      }),
+    );
+  }
+
+  // HotPepper: pull the per-seat list (お席) + interior photos from the shop page.
+  async function enrichFromPage(url) {
     if (!url) return;
     const gal = $('#hp-gallery');
     if (gal) gal.innerHTML = '<span class="hp-galmsg">店内写真・席情報を取得中…</span>';
     const { photos, seats } = await scrapeShopPage(url);
     if (seats) appendMemo(`【お席】 ${seats}`);
-    if (gal) {
-      if (photos.length) {
-        gal.innerHTML =
-          '<span class="hp-galmsg">店内写真を選択（雰囲気重視）</span>' +
-          photos.map((src) => `<button class="hp-thumb" data-src="${esc(src)}"><img src="${esc(src)}" loading="lazy" /></button>`).join('');
-        gal.querySelectorAll('.hp-thumb').forEach((b) =>
-          b.addEventListener('click', () => {
-            state.photo = b.dataset.src;
-            $('#photo-preview').innerHTML = `<img src="${esc(state.photo)}" />`;
-            gal.querySelectorAll('.hp-thumb').forEach((x) => x.classList.toggle('on', x === b));
-          }),
-        );
-      } else {
-        gal.innerHTML = '<span class="hp-galmsg">店内写真は取得できませんでした（ページ非対応の可能性）</span>';
-      }
-    }
+    renderGallery(gal, photos);
   }
+
+  // 食べログ: resolve a pasted shop URL via JSON-LD and show its photos.
+  $('#tb-go').onclick = async () => {
+    const q = $('#tb-url').value.trim();
+    if (!q) return;
+    const status = $('#tb-status');
+    const gal = $('#tb-gallery');
+    status.textContent = '取得中…';
+    status.className = 'hp-status loading';
+    gal.innerHTML = '';
+    try {
+      const shop = await tabelogResolve(q);
+      applyShop(shop);
+      if (shop.tabelogMemo) appendMemo(`【食べログ】 ${shop.tabelogMemo}`);
+      status.textContent = `Loaded: ${shop.name}`;
+      status.className = 'hp-status ok';
+      renderGallery(gal, shop.photos || []);
+    } catch (e) {
+      status.textContent = '⚠ ' + e.message;
+      status.className = 'hp-status err';
+    }
+  };
 
   function applyShop(shop) {
     state.name = shop.name;

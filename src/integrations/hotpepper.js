@@ -134,6 +134,21 @@ function proxyList() {
   return [...new Set(arr.filter(Boolean))];
 }
 
+// Fetch a page's HTML through whichever CORS proxy works.
+export async function fetchHtmlViaProxy(target) {
+  for (const px of proxyList()) {
+    try {
+      const res = await fetch(px + encodeURIComponent(target));
+      if (!res.ok) continue;
+      const t = await res.text();
+      if (t && /<html/i.test(t)) return t;
+    } catch {
+      /* try next proxy */
+    }
+  }
+  return '';
+}
+
 async function call(params) {
   // Dev server proxy (key injected server-side)
   if (!settings.key) {

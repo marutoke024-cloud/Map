@@ -1085,3 +1085,10 @@ body {
   text-decoration: none; padding: 11px 16px;
 }
 .btn.disabled, .url-open.disabled { opacity: 0.45; pointer-events: none; }
+
+/* two source boxes (HotPepper + 食べログ) side by side */
+.src-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+.src-grid .hp-block { margin: 0; }
+.src-grid .hp-row { gap: 6px; }
+.src-grid .hp-row .btn { padding: 10px 12px; }
+@media (max-width: 520px) { .src-grid { grid-template-columns: 1fr; } }

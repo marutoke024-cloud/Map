@@ -3,6 +3,7 @@
 import { addPin, updatePin, deletePin } from './pinStore.js';
 import { resolveByUrl, searchByKeyword, scrapeShopPage } from '../integrations/hotpepper.js';
 import { resolveByUrl as tabelogResolve, searchByKeyword as tabelogSearch, isTabelogUrl } from '../integrations/tabelog.js';
+import { searchByKeyword as placesSearch } from '../integrations/places.js';
 import { PREFECTURES } from '../config.js';
 
 const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
@@ -58,6 +59,16 @@ export function openPanel(pin, isNew) {
         <div class="hp-status" id="tb-status"></div>
         <div class="hp-results" id="tb-results"></div>
         <div class="hp-gallery" id="tb-gallery"></div>
+      </div>
+      <div class="hp-block">
+        <label class="field-label">Google <span class="muted">(キーワード)</span></label>
+        <div class="hp-row">
+          <input class="input" id="ggl-url" placeholder="店名・キーワード" />
+          <button class="btn btn-ghost" id="ggl-go">Search</button>
+        </div>
+        <div class="hp-status" id="ggl-status"></div>
+        <div class="hp-results" id="ggl-results"></div>
+        <div class="hp-gallery" id="ggl-gallery"></div>
       </div>
     </div>
 
@@ -299,6 +310,45 @@ export function openPanel(pin, isNew) {
           }),
         );
       }
+    } catch (e) {
+      status.textContent = '⚠ ' + e.message;
+      status.className = 'hp-status err';
+    }
+  };
+
+  // Google Places: keyword search → pick → apply (full data incl. photos).
+  $('#ggl-go').onclick = async () => {
+    const q = $('#ggl-url').value.trim();
+    if (!q) return;
+    const status = $('#ggl-status');
+    const results = $('#ggl-results');
+    const gal = $('#ggl-gallery');
+    results.innerHTML = '';
+    gal.innerHTML = '';
+    status.textContent = '検索中…';
+    status.className = 'hp-status loading';
+    try {
+      const list = await placesSearch(q);
+      status.textContent = list.length ? `${list.length}件 — 選択してください` : '該当なし';
+      status.className = 'hp-status ' + (list.length ? 'ok' : '');
+      results.innerHTML = list
+        .map(
+          (s, i) => `<button class="hp-card" data-i="${i}">
+            ${s.photo ? `<img src="${esc(s.photo)}" />` : '<div class="hp-noimg"></div>'}
+            <div><strong>${esc(s.name)}</strong><span>${esc(s.category)}${s.rating ? ' · ★' + esc(s.rating) : ''}${s.budget ? ' · ' + esc(s.budget) : ''}</span><span>${esc(s.address)}</span></div>
+          </button>`,
+        )
+        .join('');
+      results.querySelectorAll('.hp-card').forEach((c) =>
+        c.addEventListener('click', () => {
+          const shop = list[+c.dataset.i];
+          applyShop(shop);
+          status.textContent = `Loaded: ${shop.name}`;
+          status.className = 'hp-status ok';
+          results.innerHTML = '';
+          renderGallery(gal, shop.photos || []);
+        }),
+      );
     } catch (e) {
       status.textContent = '⚠ ' + e.message;
       status.className = 'hp-status err';

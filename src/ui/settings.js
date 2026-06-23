@@ -2,6 +2,7 @@
 import { gsap } from 'gsap';
 import { settings } from '../integrations/hotpepper.js';
 import { ai } from '../integrations/ai.js';
+import { places } from '../integrations/places.js';
 
 let el;
 
@@ -49,6 +50,15 @@ export function openSettings() {
     <label class="field-label">Model</label>
     <input class="input" id="set-gmodel" value="${esc(ai.model)}" placeholder="gemini-2.0-flash" />
 
+    <h2 class="settings-title" style="margin-top:26px">Google Places (キーワード検索)</h2>
+    <p class="settings-note">
+      店舗追加の「Google」枠でキーワード検索するためのキー。Google Cloud で
+      <b>Places API (New)</b> を有効化し、HTTPリファラ制限を付けて発行してください。
+      <a href="https://console.cloud.google.com/google/maps-apis" target="_blank" rel="noopener">取得 →</a>
+    </p>
+    <label class="field-label">Places API Key</label>
+    <input class="input" id="set-pkey" value="${esc(places.key)}" placeholder="AIza…" />
+
     <div class="panel-actions">
       <button class="btn btn-ghost" id="set-clear">Clear</button>
       <button class="btn btn-primary" id="set-save">Save</button>
@@ -63,6 +73,7 @@ export function openSettings() {
     settings.proxy = $('#set-proxy').value.trim();
     ai.key = $('#set-gkey').value.trim();
     ai.model = $('#set-gmodel').value.trim();
+    places.key = $('#set-pkey').value.trim();
     const btn = $('#set-save');
     btn.textContent = 'Saved ✓';
     setTimeout(closeSettings, 600);

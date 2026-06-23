@@ -1092,3 +1092,6 @@ body {
 .src-grid .hp-row { gap: 6px; }
 .src-grid .hp-row .btn { padding: 10px 12px; }
 @media (max-width: 520px) { .src-grid { grid-template-columns: 1fr; } }
+
+/* third source box (Google) spans full width under HotPepper | 食べログ */
+.src-grid .hp-block:nth-child(3) { grid-column: 1 / -1; }

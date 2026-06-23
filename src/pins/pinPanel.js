@@ -2,7 +2,7 @@
 
 import { addPin, updatePin, deletePin } from './pinStore.js';
 import { resolveByUrl, searchByKeyword, scrapeShopPage } from '../integrations/hotpepper.js';
-import { resolveByUrl as tabelogResolve } from '../integrations/tabelog.js';
+import { resolveByUrl as tabelogResolve, searchByKeyword as tabelogSearch, isTabelogUrl } from '../integrations/tabelog.js';
 import { PREFECTURES } from '../config.js';
 
 const CATEGORIES = ['Restaurant', 'Cafe', 'Bar', 'Ramen', 'Sushi', 'Sweets', 'Other'];
@@ -52,10 +52,11 @@ export function openPanel(pin, isNew) {
       <div class="hp-block">
         <label class="field-label">食べログ <span class="muted">(URL貼付)</span></label>
         <div class="hp-row">
-          <input class="input" id="tb-url" placeholder="食べログの店舗URL" />
+          <input class="input" id="tb-url" placeholder="URL / キーワード" />
           <button class="btn btn-ghost" id="tb-go">Fetch</button>
         </div>
         <div class="hp-status" id="tb-status"></div>
+        <div class="hp-results" id="tb-results"></div>
         <div class="hp-gallery" id="tb-gallery"></div>
       </div>
     </div>
@@ -249,22 +250,55 @@ export function openPanel(pin, isNew) {
     renderGallery(gal, photos);
   }
 
-  // 食べログ: resolve a pasted shop URL via JSON-LD and show its photos.
+  // 食べログ: URL → resolve directly; keyword → scrape search results to pick.
+  async function loadTabelog(url, status, gal) {
+    const shop = await tabelogResolve(url);
+    applyShop(shop);
+    if (shop.tabelogMemo) appendMemo(`【食べログ】 ${shop.tabelogMemo}`);
+    status.textContent = `Loaded: ${shop.name}`;
+    status.className = 'hp-status ok';
+    renderGallery(gal, shop.photos || []);
+  }
+
   $('#tb-go').onclick = async () => {
     const q = $('#tb-url').value.trim();
     if (!q) return;
     const status = $('#tb-status');
+    const results = $('#tb-results');
     const gal = $('#tb-gallery');
+    results.innerHTML = '';
+    gal.innerHTML = '';
     status.textContent = '取得中…';
     status.className = 'hp-status loading';
-    gal.innerHTML = '';
     try {
-      const shop = await tabelogResolve(q);
-      applyShop(shop);
-      if (shop.tabelogMemo) appendMemo(`【食べログ】 ${shop.tabelogMemo}`);
-      status.textContent = `Loaded: ${shop.name}`;
-      status.className = 'hp-status ok';
-      renderGallery(gal, shop.photos || []);
+      if (isTabelogUrl(q)) {
+        await loadTabelog(q, status, gal);
+      } else {
+        const list = await tabelogSearch(q);
+        status.textContent = list.length ? `${list.length}件 — 選択してください` : '該当なし（bot対策で取得できない場合あり）';
+        status.className = 'hp-status ' + (list.length ? 'ok' : '');
+        results.innerHTML = list
+          .map(
+            (s, i) => `<button class="hp-card" data-i="${i}">
+              ${s.photo ? `<img src="${esc(s.photo)}" />` : '<div class="hp-noimg"></div>'}
+              <div><strong>${esc(s.name)}</strong><span>${esc(s.genre)}${s.rating ? ' · ★' + esc(s.rating) : ''}</span></div>
+            </button>`,
+          )
+          .join('');
+        results.querySelectorAll('.hp-card').forEach((c) =>
+          c.addEventListener('click', async () => {
+            results.innerHTML = '';
+            status.textContent = '取得中…';
+            status.className = 'hp-status loading';
+            try {
+              await loadTabelog(list[+c.dataset.i].url, status, gal);
+            } catch (e) {
+              status.textContent = '⚠ ' + e.message;
+              status.className = 'hp-status err';
+            }
+          }),
+        );
+      }
     } catch (e) {
       status.textContent = '⚠ ' + e.message;
       status.className = 'hp-status err';

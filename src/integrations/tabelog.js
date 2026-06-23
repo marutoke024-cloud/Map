@@ -9,6 +9,39 @@ import { fetchHtmlViaProxy } from './hotpepper.js';
 
 export const isTabelogUrl = (u) => /tabelog\.com/i.test(u || '');
 
+// Shop page URL pattern: /{pref}/A####/A######/{id}/
+const SHOP_RE = /^https?:\/\/tabelog\.com\/[a-z]+\/A\d+\/A\d+\/\d+\/?$/i;
+
+// Keyword search by scraping the public results page (Tabelog has no API).
+// Best-effort: returns light candidates {name, url, rating, genre, photo}.
+export async function searchByKeyword(keyword) {
+  const target = `https://tabelog.com/rst/rstsearch/?sw=${encodeURIComponent(keyword)}`;
+  const html = await fetchHtmlViaProxy(target);
+  if (!html) throw new Error('食べログの検索結果を取得できませんでした（CORSプロキシ/ bot対策）');
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  const out = [];
+  const seen = new Set();
+  for (const a of doc.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href') || '';
+    if (!SHOP_RE.test(href)) continue;
+    const name = (a.textContent || '').trim();
+    if (!name || name.length > 40) continue; // photo links etc. have no/long text
+    const url = href.replace(/\/$/, '') + '/';
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const item = a.closest('.list-rst, li, .js-rstlist-info > *') || a.parentElement;
+    const rating = item?.querySelector('.list-rst__rate-val, .c-rating__val')?.textContent?.trim() || '';
+    const genre = item?.querySelector('.list-rst__area-genre, .list-rst__area-genre--target')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    let photo = '';
+    const img = item?.querySelector('img');
+    if (img) photo = img.getAttribute('src') || img.getAttribute('data-original') || img.getAttribute('data-src') || '';
+    out.push({ name, url, rating, genre, photo });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 function typeMatches(t) {
   const arr = [].concat(t || []);
   return arr.some((x) => /Restaurant|FoodEstablishment|LocalBusiness/i.test(x));
